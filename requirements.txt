@@ -1,0 +1,7 @@
+Flask==2.2.2
+Flask-Mail
+Flask-WTF
+psycopg2-binary
+supabase
+python-dotenv
+gunicorn
