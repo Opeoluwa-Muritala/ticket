@@ -46,8 +46,7 @@
               {% if ticket.file_path %}
                 {% set ext = ticket.file_path.split('.')[-1].lower() %}
                 {% if ext in ['jpg', 'jpeg', 'png', 'gif'] %}
-                  <img src="{{ url_for('uploaded_file', filename=ticket.file_path) }}" 
-                       alt="File" style="max-width:100px; max-height:100px;">
+                <img src="{{ ticket.file_path }}" alt="Ticket Screenshot" width="100" height="100">
                 {% else %}
                   <span>View File</span>
                 {% endif %}
