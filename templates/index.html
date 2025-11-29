@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Ticket Submission</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <h1>Report Error</h1>
+  <form method="POST" enctype="multipart/form-data" novalidate>
+    {{ form.csrf_token }}
+    
+    <label for="name">Full Name *</label>
+    {{ form.name(size=32, required=True) }}
+    {% for error in form.name.errors %}
+      <span class="error">{{ error }}</span>
+    {% endfor %}
+
+    <label for="account">Account Number *</label>
+    {{ form.account(size=32, required=True, maxlength="10", pattern="^\d{10}$", title="Enter exactly 10 digits") }}
+    {% for error in form.account.errors %}
+      <span class="error">{{ error }}</span>
+    {% endfor %}
+
+    <label for="email">Email Address *</label>
+    {{ form.email(size=32, required=True) }}
+    {% for error in form.email.errors %}
+      <span class="error">{{ error }}</span>
+    {% endfor %}
+
+    <label for="reference">Transaction Reference</label>
+    {{ form.reference(size=32) }}
+    {% for error in form.reference.errors %}
+      <span class="error">{{ error }}</span>
+    {% endfor %}
+
+    <label for="error_type">Error Type *</label>
+    {{ form.error_type(required=True) }}
+    {% for error in form.error_type.errors %}
+      <span class="error">{{ error }}</span>
+    {% endfor %}
+
+    <label for="description">What happened? *</label>
+    {{ form.description(rows=4, required=True) }}
+    {% for error in form.description.errors %}
+      <span class="error">{{ error }}</span>
+    {% endfor %}
+
+    <!-- Example file input in your form -->
+<label for="file">Upload Screenshot (Optional)</label>
+{{ form.file(class="file-input", accept="image/*,application/pdf") }}
+<div>
+  <img id="file-preview" src="#" alt="Image Preview" style="display:none; width:200px; height:200px; object-fit: contain;" />
+  <iframe id="pdf-preview" style="display:none; width:200px; height:200px;" frameborder="0"></iframe>
+  {% if ticket is defined and ticket.file_path %}
+    {% set url = url_for('uploaded_file', filename=ticket.file_path) %}
+    {% if ticket.file_path.lower().endswith(('.jpg','.jpeg','.png')) %}
+      <img src="{{ url }}" alt="Attachment" style="max-width:500px;height:auto;">
+    {% elif ticket.file_path.lower().endswith('.pdf') %}
+      <embed src="{{ url }}" type="application/pdf" width="700" height="500"/>
+      <p><a href="{{ url }}" target="_blank" rel="noopener">Open PDF</a></p>
+    {% else %}
+      <a href="{{ url }}">Download attachment</a>
+    {% endif %}
+  {% endif %}
+</div>
+
+    {% for error in form.file.errors %}
+      <span class="error">{{ error }}</span>
+    {% endfor %}
+    
+    <button type="submit">Submit Report</button>
+  </form>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+  $('.file-input').on('change', function(e) {
+    var file = e.target.files[0];
+    var previewImg = $('#file-preview');
+    var previewPdf = $('#pdf-preview');
+
+    // Hide both previews initially
+    previewImg.hide();
+    previewPdf.hide();
+
+    if (file) {
+      if (file.type.match('image.*')) {
+        // Show image preview
+        var reader = new FileReader();
+        reader.onload = function(evt) {
+          previewImg.attr('src', evt.target.result + "#" + new Date().getTime()).show();
+        };
+        reader.readAsDataURL(file);
+      } else if (file.type === "application/pdf") {
+        // Show PDF preview
+        var reader = new FileReader();
+        reader.onload = function(evt) {
+          previewPdf.attr('src', evt.target.result).show();
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  });
+
+  // Disable submit button on first click to prevent multiple submissions
+  $('form').on('submit', function(){
+    $(this).find('button[type="submit"]').prop('disabled', true);
+  });
+</script>
+
+{% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <ul class="flash-messages">
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+</body>
+</html>

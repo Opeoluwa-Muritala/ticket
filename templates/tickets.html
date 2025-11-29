@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>All Tickets</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='tickets_style.css') }}">
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.3/js/jquery.tablesorter.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.3/css/theme.default.min.css">
+</head>
+<body>
+  <h1>All Submitted Tickets</h1>
+  <div class="table-container">
+    <table id="tickets-table" class="tablesorter">
+      <thead>
+        <tr>
+          <th>Ticket ID</th>
+          <th>Full Name</th>
+          <th>Error Type</th>
+          <th>Status</th>
+          <th>Description</th>
+          <th>File</th>
+          <th>Account Number</th>
+          <th>Email</th>
+          <th>Reference</th>
+          <th>Created At</th>
+          <th>Closed At</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ticket in tickets %}
+          <tr class="clickable-row" data-href="{{ url_for('ticket_detail', ticket_id=ticket.ticket_id) }}">
+            <td>
+              <a href="{{ url_for('ticket_detail', ticket_id=ticket.ticket_id) }}" 
+                 class="ticket-link">{{ ticket.ticket_id }}</a>
+            </td>
+            <td>{{ ticket.fullname }}</td>
+            <td>{{ ticket.error_type }}</td>
+            <td>{{ ticket.status }}</td>
+            <td title="{{ ticket.description }}">
+              {{ ticket.description[:50] }}{% if ticket.description|length > 50 %}...{% endif %}
+            </td>
+            <td>
+              {% if ticket.file_path %}
+                {% set ext = ticket.file_path.split('.')[-1].lower() %}
+                {% if ext in ['jpg', 'jpeg', 'png', 'gif'] %}
+                  <img src="{{ url_for('uploaded_file', filename=ticket.file_path) }}" 
+                       alt="File" style="max-width:100px; max-height:100px;">
+                {% else %}
+                  <span>View File</span>
+                {% endif %}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>{{ ticket.account_number }}</td>
+            <td>{{ ticket.email }}</td>
+            <td>{{ ticket.reference }}</td>
+            <td>{{ ticket.created_at }}</td>
+            <td>{{ ticket.closed_at if ticket.closed_at else 'N/A' }}</td>
+            <td>
+              {% if ticket.status == "Open" %}
+                <form action="{{ url_for('close_ticket', ticket_id=ticket.ticket_id) }}" 
+                      method="POST" 
+                      onclick="event.stopPropagation();">
+                  <button type="submit">Close Ticket</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <script>
+    $(document).ready(function() {
+      $("#tickets-table").tablesorter();
+      
+      // Updated click handler
+      $(".clickable-row").on('click', function(e) {
+        // Prevent default behavior
+        e.preventDefault();
+        // Get the URL from data-href attribute
+        var href = $(this).data("href");
+        // Navigate to the URL
+        if (href) {
+            window.location.href = href;
+        }
+      });
+
+      // Stop propagation for buttons and forms
+      $(".clickable-row button, .clickable-row form").on('click', function(e) {
+        e.stopPropagation();
+      });
+    });
+  </script>
+</body>
+</html>
