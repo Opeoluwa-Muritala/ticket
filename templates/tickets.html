@@ -8,9 +8,37 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.3/js/jquery.tablesorter.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.3/css/theme.default.min.css">
+  
+  <style>
+    /* Simple styling for the export button */
+    .header-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    .export-btn {
+        background-color: #28a745;
+        color: white;
+        padding: 10px 15px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: bold;
+        text-decoration: none;
+    }
+    .export-btn:hover {
+        background-color: #218838;
+    }
+  </style>
 </head>
 <body>
-  <h1>All Submitted Tickets</h1>
+  
+  <div class="header-actions">
+      <h1>All Submitted Tickets</h1>
+      <button id="export-csv" class="export-btn">Download Data</button>
+  </div>
+
   <div class="table-container">
     <table id="tickets-table" class="tablesorter">
       <thead>
@@ -46,7 +74,7 @@
               {% if ticket.file_path %}
                 {% set ext = ticket.file_path.split('.')[-1].lower() %}
                 {% if ext in ['jpg', 'jpeg', 'png', 'gif'] %}
-                <img src="{{ ticket.file_path }}" alt="Ticket Screenshot" width="100" height="100">
+                <img src="{{ ticket.file_path }}" class="ticket-img" alt="Ticket Screenshot" width="100" height="100">
                 {% else %}
                   <span>View File</span>
                 {% endif %}
@@ -73,17 +101,15 @@
       </tbody>
     </table>
   </div>
+
   <script>
     $(document).ready(function() {
       $("#tickets-table").tablesorter();
       
       // Updated click handler
       $(".clickable-row").on('click', function(e) {
-        // Prevent default behavior
         e.preventDefault();
-        // Get the URL from data-href attribute
         var href = $(this).data("href");
-        // Navigate to the URL
         if (href) {
             window.location.href = href;
         }
@@ -92,6 +118,51 @@
       // Stop propagation for buttons and forms
       $(".clickable-row button, .clickable-row form").on('click', function(e) {
         e.stopPropagation();
+      });
+
+      // ---- CSV EXPORT LOGIC ----
+      $("#export-csv").on('click', function() {
+          var csv = [];
+          var rows = $("#tickets-table tr");
+          
+          rows.each(function(rowIndex, row) {
+              var rowData = [];
+              $(row).find("th, td").each(function(colIndex, col) {
+                  var $col = $(col);
+                  var text = "";
+
+                  // Special handling: If it's an image, get the src URL
+                  if ($col.find("img").length > 0) {
+                      text = $col.find("img").attr("src");
+                  } 
+                  // Special handling: Ignore the "Action" column buttons
+                  else if ($col.find("button").length > 0) {
+                      text = ""; 
+                  }
+                  else {
+                      // Otherwise just get the text
+                      text = $col.text().trim();
+                  }
+
+                  // CSV Formatting: wrap in quotes and escape existing quotes
+                  text = '"' + text.replace(/"/g, '""') + '"';
+                  rowData.push(text);
+              });
+              csv.push(rowData.join(","));
+          });
+
+          // Create the CSV file
+          var csvFile = new Blob([csv.join("\n")], { type: "text/csv" });
+          
+          // Create a download link
+          var downloadLink = document.createElement("a");
+          downloadLink.download = "tickets_export.csv";
+          downloadLink.href = window.URL.createObjectURL(csvFile);
+          downloadLink.style.display = "none";
+          
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          document.body.removeChild(downloadLink);
       });
     });
   </script>
