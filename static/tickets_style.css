@@ -1,0 +1,144 @@
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 20px;
+  background: #f5f5f7;
+  color: #333;
+}
+
+h1 {
+  text-align: center;
+  color: #4a154b;
+  margin-bottom: 2rem;
+  font-size: 2em;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.table-container {
+  overflow-x: auto;
+  margin: 0 auto;
+  max-width: 95%;
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background-color: white;
+  margin-bottom: 1rem;
+}
+
+th, td {
+  padding: 12px 15px;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+th {
+  background-color: #6b4e71;
+  color: white;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.9em;
+  letter-spacing: 0.5px;
+}
+
+tr:nth-child(even) {
+  background-color: #f8f6f9;
+}
+
+tr:hover {
+  background-color: #ece7ef;
+  transition: background-color 0.2s ease;
+}
+
+/* Style for action buttons */
+button {
+  background-color: #4a154b;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.2s ease;
+}
+
+button:hover {
+  background-color: #611f69;
+}
+
+/* Status column styling */
+td:nth-child(4) {
+  font-weight: 600;
+}
+
+/* File preview image styling */
+img {
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+}
+
+/* Link styling */
+a {
+  color: #4a154b;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.ticket-link {
+    color: #4a154b;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.ticket-link:hover {
+    text-decoration: underline;
+}
+
+.clickable-row {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.clickable-row:hover {
+    background-color: #f0ebf2 !important;
+}
+
+.clickable-row td {
+    position: relative;
+}
+
+/* Ensure buttons and forms don't trigger row click */
+.clickable-row button,
+.clickable-row form {
+    position: relative;
+    z-index: 2;
+}
+
+@media (max-width: 768px) {
+  .table-container {
+    padding: 10px;
+    max-width: 100%;
+  }
+  
+  table {
+    font-size: 14px;
+  }
+  
+  th, td {
+    padding: 8px;
+  }
+  
+  button {
+    padding: 6px 12px;
+    font-size: 0.8em;
+  }
+}
