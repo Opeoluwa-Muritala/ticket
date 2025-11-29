@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket Details - {{ ticket.ticket_id }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ticket_detail.css') }}">
+</head>
+<body>
+  <div class="container">
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <ul class="flash-messages">
+          {% for message in messages %}
+            <li>{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+    <div class="ticket-header">
+      <h1>Ticket Details</h1>
+      <a href="{{ url_for('view_tickets') }}" class="back-button">← Back to All Tickets</a>
+    </div>
+    
+    <div class="ticket-info">
+        <div class="info-section">
+            <h2>Ticket ID: {{ ticket.ticket_id }}</h2>
+            <span class="status-badge {{ ticket.status.lower() }}">{{ ticket.status }}</span>
+        </div>
+        
+        <div class="info-grid">
+            <div class="info-item">
+                <label>Submitted By:</label>
+                <span>{{ ticket.fullname }}</span>
+            </div>
+            <div class="info-item">
+                <label>Account Number:</label>
+                <span>{{ ticket.account_number }}</span>
+            </div>
+            <div class="info-item">
+                <label>Email:</label>
+                <span>{{ ticket.email }}</span>
+            </div>
+            <div class="info-item">
+                <label>Reference:</label>
+                <span>{{ ticket.reference or 'N/A' }}</span>
+            </div>
+            <div class="info-item">
+                <label>Error Type:</label>
+                <span>{{ ticket.error_type }}</span>
+            </div>
+            <div class="info-item">
+                <label>Created At:</label>
+                <span>{{ ticket.created_at }}</span>
+            </div>
+            <div class="info-item">
+                <label>Closed At:</label>
+                <span>{{ ticket.closed_at if ticket.closed_at else 'N/A' }}</span>
+            </div>
+        </div>
+
+        <div class="description-section">
+            <h3>Description</h3>
+            <p>{{ ticket.description }}</p>
+        </div>
+
+        {% if ticket.file_path %}
+  <h3>Attachment</h3>
+  {% set url = url_for('uploaded_file', filename=ticket.file_path) %}
+  {% if ticket.file_path.lower().endswith(('.jpg','.jpeg','.png')) %}
+    <img src="{{ url }}" alt="Attachment" style="height:200px; width:auto; object-fit: contain;">
+  {% elif ticket.file_path.lower().endswith('.pdf') %}
+    <embed src="{{ url }}" type="application/pdf" width="700" height="500"/>
+    <p><a href="{{ url }}" target="_blank" rel="noopener">Open PDF</a></p>
+  {% else %}
+    <a href="{{ url }}">Download attachment</a>
+  {% endif %}
+{% endif %}
+
+
+            
+            <div class="actions-section">
+                {% if ticket.status == "Open" %}
+                <form action="{{ url_for('close_ticket', ticket_id=ticket.ticket_id) }}" method="POST">
+                    <button type="submit" class="close-button">Close Ticket</button>
+                </form>
+                {% endif %}
+                <form action="{{ url_for('delete_ticket', ticket_id=ticket.ticket_id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this ticket?');">
+                    <button type="submit" class="delete-button">Delete Ticket</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
