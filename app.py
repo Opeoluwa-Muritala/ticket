@@ -1,6 +1,7 @@
-from flask import Flask, render_template, request, redirect, flash, url_for, session
+from flask import Flask, render_template, request, redirect, flash, url_for, session, jsonify
 from flask_mail import Mail, Message
 from flask_wtf import FlaskForm
+from flask_cors import CORS # Add CORS
 from wtforms import StringField, TextAreaField, SelectField
 from flask_wtf.file import FileField, FileAllowed
 from wtforms.validators import DataRequired, Email, Length, Regexp
@@ -15,6 +16,7 @@ import os
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)
 app.secret_key = os.getenv('SECRET_KEY', 'fallback-dev-key')
 
 # ---- Configuration ---- #
@@ -227,26 +229,111 @@ def delete_ticket(ticket_id):
 def ticket_detail(ticket_id):
     if not session.get('admin_authenticated'):
         return redirect('/tickets')
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s", (ticket_id,))
-        ticket = cursor.fetchone()
+    
+    # --- TEMPORARILY REMOVED TRY/EXCEPT FOR DEBUGGING ---
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s", (ticket_id,))
+    ticket = cursor.fetchone()
+    
+    if ticket:
+        cursor.execute("SELECT * FROM messages WHERE ticket_id = %s ORDER BY created_at ASC", (ticket_id,))
+        messages = cursor.fetchall()
         cursor.close()
         conn.close()
-        if ticket:
-            return render_template('ticket_detail.html', ticket=ticket)
-        else:
-            flash("Ticket not found.")
-            return redirect('/tickets')
-    except Exception as e:
-        flash(f"Database error: {str(e)}")
-        return redirect('/tickets')
+        # If there is an HTML error, the browser will now tell you exactly where!
+        return render_template('ticket_detail.html', ticket=ticket, messages=messages)
+    else:
+        cursor.close()
+        conn.close()
+        flash("Ticket not found.")
+    return redirect('/tickets')
 
 # Helper to fix common favicon 404s
 @app.route('/favicon.ico')
 def favicon():
     return ("", 204)
+
+@app.route('/api/init_ticket', methods=['POST'])
+def api_init_ticket():
+    data = request.json
+    ticket_id = f"TICKET-{str(uuid.uuid4())[:8]}"
+    
+    # 1. Insert the Ticket (Metadata)
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Create the ticket row
+        sql_ticket = """
+            INSERT INTO tickets (ticket_id, fullname, account_number, email, reference, error_type, description, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'Open')
+        """
+        cursor.execute(sql_ticket, (
+            ticket_id, data['name'], int(data['account']), data['email'], 
+            data.get('reference', ''), data.get('error_type', 'Other'), data['description']
+        ))
+
+        # 2. Add the Description as the first "Message"
+        sql_msg = "INSERT INTO messages (ticket_id, sender_type, content) VALUES (%s, 'user', %s)"
+        cursor.execute(sql_msg, (ticket_id, data['description']))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        # Send Alert Email to Admin (Same as before)
+        # ... (Insert your existing mail code here) ...
+
+        return jsonify({"status": "success", "ticket_id": ticket_id})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/ticket/<ticket_id>/history', methods=['GET'])
+def api_ticket_history(ticket_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        # Fetch all messages for this ticket
+        cursor.execute("SELECT sender_type, content, created_at FROM messages WHERE ticket_id = %s ORDER BY created_at ASC", (ticket_id,))
+        messages = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return jsonify(messages)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/reply', methods=['POST'])
+def api_reply():
+    data = request.json
+    ticket_id = data['ticket_id']
+    content = data['message']
+    sender = data['sender_type'] # 'user' or 'admin'
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO messages (ticket_id, sender_type, content) VALUES (%s, %s, %s)", 
+                       (ticket_id, sender, content))
+        conn.commit()
+        
+        # IF ADMIN REPLIED -> EMAIL THE USER
+        if sender == 'admin':
+             # Fetch user email
+            cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
+            user_email = cursor.fetchone()[0]
+            
+            msg = Message(subject=f"Reply on Ticket {ticket_id}",
+                          sender=app.config['MAIL_USERNAME'],
+                          recipients=[user_email])
+            msg.body = f"Update on your ticket:\n\n{content}\n\nPlease check the chat widget for more details."
+            mail.send(msg)
+
+        cursor.close()
+        conn.close()
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':

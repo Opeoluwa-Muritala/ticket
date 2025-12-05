@@ -1,6 +1,7 @@
 Flask
 Flask-Mail
 Flask-WTF
+Flask-Cors
 email-validator
 Werkzeug==2.2.3
 psycopg2-binary

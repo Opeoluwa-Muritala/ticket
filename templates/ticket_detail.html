@@ -64,6 +64,47 @@
             <h3>Description</h3>
             <p>{{ ticket.description }}</p>
         </div>
+        <div class="chat-history">
+            <h3 style="margin-bottom: 20px;">Conversation History</h3>
+            
+            {% for msg in messages %}
+                <div class="message {{ msg.sender_type }}">
+                    <span class="message-sender">
+                        {{ 'Support Team' if msg.sender_type == 'admin' else 'User' }}
+                    </span>
+                    
+                    {{ msg.content }}
+                    
+                    <small class="message-time">{{ msg.created_at }}</small>
+                </div>
+            {% endfor %}
+        
+            {% if not messages %}
+                <p style="text-align: center; color: #888;">No messages yet.</p>
+            {% endif %}
+        </div>
+        
+        <div class="reply-section" style="margin-top: 20px;">
+            <h3>Reply to User</h3>
+            <textarea id="admin-reply-text" style="width:100%; height:100px;"></textarea>
+            <button onclick="sendAdminReply('{{ ticket.ticket_id }}')" style="background: blue; color: white; padding: 10px;">Send Reply</button>
+        </div>
+        
+        <script>
+        async function sendAdminReply(ticketId) {
+            const text = document.getElementById('admin-reply-text').value;
+            await fetch('/api/reply', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    ticket_id: ticketId,
+                    sender_type: 'admin',
+                    message: text
+                })
+            });
+            location.reload(); // Reload page to see message
+        }
+        </script>
 
         {% if ticket.file_path %}
         <div class="attachment-section" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
