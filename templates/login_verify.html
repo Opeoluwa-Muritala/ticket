@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Verify</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ticket_detail.css') }}">
+</head>
+<body>
+    <div class="login-wrapper">
+        <div class="login-card">
+            <h2>Verify Code</h2>
+            <p>Code sent to <strong>{{ email }}</strong></p>
+            <form method="POST" action="/auth/verify">
+                <input type="hidden" name="email" value="{{ email }}">
+                <input type="text" name="code" class="otp-input" placeholder="000000" maxlength="6" required>
+                <button type="submit" class="btn btn-save" style="width:100%;">Login</button>
+            </form>
+            <br><a href="/auth/login" style="color:red; font-size:12px;">Wrong Email?</a>
+        </div>
+    </div>
+</body>
+</html>

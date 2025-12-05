@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Ticket #{{ ticket.ticket_id }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ticket_detail.css') }}">
+</head>
+<body>
+<div class="container">
+    <div class="dashboard-header">
+        <h1>Ticket Status</h1>
+        <a href="/my-tickets" class="btn btn-back">← Back</a>
+    </div>
+    <div class="ticket-dashboard">
+        <aside class="ticket-sidebar">
+            <div class="sidebar-section"><span class="sidebar-label">ID</span><span class="sidebar-value">{{ ticket.ticket_id }}</span></div>
+            <div class="sidebar-section"><span class="sidebar-label">Status</span><span class="status-badge {{ ticket.status|lower }}">{{ ticket.status }}</span></div>
+            <div class="sidebar-section"><span class="sidebar-label">Reference</span><span class="sidebar-value">{{ ticket.reference or 'N/A' }}</span></div>
+        </aside>
+        <main class="ticket-main">
+            <div class="panel-header">Conversation</div>
+            <div class="panel-body">
+                <div class="chat-container">
+                    <div class="message outgoing">
+                        <div class="msg-header"><span>Me</span><span>{{ ticket.created_at.strftime('%I:%M %p') }}</span></div>
+                        {{ ticket.description }}
+                    </div>
+                    {% for msg in messages %}
+                    <div class="message {{ 'outgoing' if msg.sender_type == 'user' else 'incoming' }}">
+                        <div class="msg-header"><span>{{ 'Me' if msg.sender_type == 'user' else 'Support' }}</span><span>{{ msg.created_at.strftime('%d %b %I:%M %p') }}</span></div>
+                        {{ msg.content }}
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="reply-area" style="background:#fff; padding:15px; border:1px solid #ddd; border-radius:8px;">
+                    <textarea id="reply-text" style="width:100%; height:80px; padding:10px; border:1px solid #ddd; border-radius:4px;" placeholder="Type reply..."></textarea>
+                    <button onclick="sendReply()" class="btn btn-save" style="margin-top:10px;">Send Reply</button>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+<script>
+    async function sendReply() {
+        const text = document.getElementById('reply-text').value;
+        if(!text) return;
+        await fetch('/api/reply', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({ticket_id:'{{ ticket.ticket_id }}', sender_type:'user', message:text})
+        });
+        location.reload();
+    }
+</script>
+</body>
+</html>
