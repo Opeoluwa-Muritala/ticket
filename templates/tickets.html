@@ -3,113 +3,93 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <!-- Google Tag Manager -->
-<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-})(window,document,'script','dataLayer','GTM-WKSVSGDC');</script>
-<!-- End Google Tag Manager -->
+  
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','GTM-WKSVSGDC');</script>
   <title>All Tickets</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='tickets_style.css') }}">
+  
+  <link rel="stylesheet" href="{{ url_for('static', filename='ticket_style.css') }}">
+  
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.3/js/jquery.tablesorter.min.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.3/css/theme.default.min.css">
-  
-  <style>
-    /* Simple styling for the export button */
-    .header-actions {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 10px;
-    }
-    .export-btn {
-        background-color: #28a745;
-        color: white;
-        padding: 10px 15px;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-weight: bold;
-        text-decoration: none;
-    }
-    .export-btn:hover {
-        background-color: #218838;
-    }
-  </style>
 </head>
 <body>
-  <!-- Google Tag Manager (noscript) -->
-<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WKSVSGDC"
-height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-<!-- End Google Tag Manager (noscript) -->
-  <div class="header-actions">
-      <h1>All Submitted Tickets</h1>
-      <button id="export-csv" class="export-btn">Download Data</button>
-  </div>
+  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WKSVSGDC"
+  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <div class="container">
+      <div class="dashboard-header">
+          <h1>All Submitted Tickets</h1>
+          <button id="export-csv" class="btn btn-save">Download Data</button>
+      </div>
 
-  <div class="table-container">
-    <table id="tickets-table" class="tablesorter">
-      <thead>
-        <tr>
-          <th>Ticket ID</th>
-          <th>Full Name</th>
-          <th>Error Type</th>
-          <th>Status</th>
-          <th>Description</th>
-          <th>File</th>
-          <th>Account Number</th>
-          <th>Email</th>
-          <th>Reference</th>
-          <th>Created At</th>
-          <th>Closed At</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for ticket in tickets %}
-          <tr class="clickable-row" data-href="{{ url_for('ticket_detail', ticket_id=ticket.ticket_id) }}">
-            <td>
-              <a href="{{ url_for('ticket_detail', ticket_id=ticket.ticket_id) }}" 
-                 class="ticket-link">{{ ticket.ticket_id }}</a>
-            </td>
-            <td>{{ ticket.fullname }}</td>
-            <td>{{ ticket.error_type }}</td>
-            <td>{{ ticket.status }}</td>
-            <td title="{{ ticket.description }}">
-              {{ ticket.description[:50] }}{% if ticket.description|length > 50 %}...{% endif %}
-            </td>
-            <td>
-              {% if ticket.file_path %}
-                {% set ext = ticket.file_path.split('.')[-1].lower() %}
-                {% if ext in ['jpg', 'jpeg', 'png', 'gif'] %}
-                <img src="{{ ticket.file_path }}" class="ticket-img" alt="Ticket Screenshot" width="100" height="100">
-                {% else %}
-                  <span>View File</span>
-                {% endif %}
-              {% else %}
-                N/A
-              {% endif %}
-            </td>
-            <td>{{ ticket.account_number }}</td>
-            <td>{{ ticket.email }}</td>
-            <td>{{ ticket.reference }}</td>
-            <td>{{ ticket.created_at }}</td>
-            <td>{{ ticket.closed_at if ticket.closed_at else 'N/A' }}</td>
-            <td>
-              {% if ticket.status == "Open" %}
-                <form action="{{ url_for('close_ticket', ticket_id=ticket.ticket_id) }}" 
-                      method="POST" 
-                      onclick="event.stopPropagation();">
-                  <button type="submit">Close Ticket</button>
-                </form>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+      <div class="table-container">
+        <table id="tickets-table" class="ticket-table tablesorter">
+          <thead>
+            <tr>
+              <th>Ticket ID</th>
+              <th>Full Name</th>
+              <th>Error Type</th>
+              <th>Status</th>
+              <th>Description</th>
+              <th>File</th>
+              <th>Account Number</th>
+              <th>Email</th>
+              <th>Reference</th>
+              <th>Created At</th>
+              <th>Closed At</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ticket in tickets %}
+              <tr class="clickable-row" data-href="{{ url_for('ticket_detail', ticket_id=ticket.ticket_id) }}">
+                <td class="ticket-id-cell">
+                  <a href="{{ url_for('ticket_detail', ticket_id=ticket.ticket_id) }}" class="ticket-link">{{ ticket.ticket_id }}</a>
+                </td>
+                <td>{{ ticket.fullname }}</td>
+                <td>{{ ticket.error_type }}</td>
+                <td><span class="status-badge {{ ticket.status|lower }}">{{ ticket.status }}</span></td>
+                <td title="{{ ticket.description }}">
+                  {{ ticket.description[:50] }}{% if ticket.description|length > 50 %}...{% endif %}
+                </td>
+                <td>
+                  {% if ticket.file_path %}
+                    {% set ext = ticket.file_path.split('.')[-1].lower() %}
+                    {% if ext in ['jpg', 'jpeg', 'png', 'gif'] %}
+                    <img src="{{ ticket.file_path }}" alt="Screenshot" width="50" height="50" style="object-fit: cover;">
+                    {% else %}
+                      <a href="{{ ticket.file_path }}" target="_blank">View File</a>
+                    {% endif %}
+                  {% else %}
+                    <span style="color:#999;">N/A</span>
+                  {% endif %}
+                </td>
+                <td>{{ ticket.account_number }}</td>
+                <td>{{ ticket.email }}</td>
+                <td>{{ ticket.reference or '-' }}</td>
+                <td>{{ ticket.created_at.strftime('%Y-%m-%d %H:%M') if ticket.created_at else '' }}</td>
+                <td>{{ ticket.closed_at.strftime('%Y-%m-%d %H:%M') if ticket.closed_at else '-' }}</td>
+                <td>
+                  {% if ticket.status == "Open" %}
+                    <form action="{{ url_for('close_ticket', ticket_id=ticket.ticket_id) }}" 
+                          method="POST" 
+                          onclick="event.stopPropagation();"
+                          style="display:inline; box-shadow:none; padding:0;">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button type="submit" class="btn btn-cancel btn-sm">Close</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
   </div>
 
   <script>
@@ -118,15 +98,17 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       
       // Updated click handler
       $(".clickable-row").on('click', function(e) {
-        e.preventDefault();
-        var href = $(this).data("href");
-        if (href) {
-            window.location.href = href;
+        // Only redirect if text was not selected (allows copy-pasting)
+        if (window.getSelection().toString().length === 0) {
+            var href = $(this).data("href");
+            if (href) {
+                window.location.href = href;
+            }
         }
       });
 
-      // Stop propagation for buttons and forms
-      $(".clickable-row button, .clickable-row form").on('click', function(e) {
+      // Stop propagation for buttons, forms, and links inside rows
+      $(".clickable-row button, .clickable-row form, .clickable-row a").on('click', function(e) {
         e.stopPropagation();
       });
 
@@ -141,35 +123,31 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
                   var $col = $(col);
                   var text = "";
 
-                  // Special handling: If it's an image, get the src URL
-                  if ($col.find("img").length > 0) {
-                      text = $col.find("img").attr("src");
-                  } 
-                  // Special handling: Ignore the "Action" column buttons
-                  else if ($col.find("button").length > 0) {
+                  // Get text content, ignoring buttons
+                  if ($col.find("button").length > 0) {
                       text = ""; 
-                  }
-                  else {
-                      // Otherwise just get the text
-                      text = $col.text().trim();
+                  } else {
+                      // Clone to avoid modifying original, remove scripts/buttons inside
+                      var $clone = $col.clone();
+                      $clone.find("button, script, style").remove();
+                      text = $clone.text().trim();
                   }
 
-                  // CSV Formatting: wrap in quotes and escape existing quotes
+                  // Handle potentially missing values or newlines
+                  text = text.replace(/\n/g, " ").replace(/\s+/g, " ");
+
+                  // CSV Escaping
                   text = '"' + text.replace(/"/g, '""') + '"';
                   rowData.push(text);
               });
               csv.push(rowData.join(","));
           });
 
-          // Create the CSV file
           var csvFile = new Blob([csv.join("\n")], { type: "text/csv" });
-          
-          // Create a download link
           var downloadLink = document.createElement("a");
           downloadLink.download = "tickets_export.csv";
           downloadLink.href = window.URL.createObjectURL(csvFile);
           downloadLink.style.display = "none";
-          
           document.body.appendChild(downloadLink);
           downloadLink.click();
           document.body.removeChild(downloadLink);
@@ -177,5 +155,4 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     });
   </script>
 </body>
-
 </html>
