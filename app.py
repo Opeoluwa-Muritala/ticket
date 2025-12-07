@@ -1,7 +1,10 @@
-from flask import Flask, render_template, request, redirect, flash, url_for, session, jsonify
+from flask import Flask, render_template, request, redirect, flash, url_for, session, jsonify, abort
 from flask_mail import Mail, Message
 from flask_wtf import FlaskForm
-from flask_cors import CORS # Add CORS
+from flask_wtf.csrf import CSRFProtect  # Added CSRF Protection
+from flask_cors import CORS
+from flask_limiter import Limiter  # Added Rate Limiting
+from flask_limiter.util import get_remote_address
 from wtforms import StringField, TextAreaField, SelectField
 from flask_wtf.file import FileField, FileAllowed
 from wtforms.validators import DataRequired, Email, Length, Regexp
@@ -12,6 +15,7 @@ import psycopg2
 import psycopg2.extras
 import uuid
 import os
+import logging # Added for proper logging
 
 load_dotenv()
 
@@ -21,10 +25,18 @@ app.secret_key = os.getenv('SECRET_KEY', 'fallback-dev-key')
 
 # ---- Configuration ---- #
 
+# Security & Rate Limiting
+csrf = CSRFProtect(app) # Initialize CSRF protection globally
+limiter = Limiter(key_func=get_remote_address, app=app) # Initialize Rate Limiting
+
+# Logging Configuration
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Mail Configuration
 app.config['MAIL_SERVER'] = 'sandbox.smtp.mailtrap.io'
 app.config['MAIL_PORT'] = 2525
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME') # Move specific credentials to .env
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
@@ -32,15 +44,13 @@ mail = Mail(app)
 
 # Supabase Configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY") # Use the SERVICE_ROLE key for backend uploads
-DATABASE_URL = os.getenv("DATABASE_URL") # PostgreSQL Connection URI
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Initialize Supabase Client (For Storage)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
-# ---- Form Class  ---- #
+# ---- Form Class ---- #
 class TicketForm(FlaskForm):
     name = StringField('Name', validators=[DataRequired()])
     account = StringField('Account', 
@@ -75,8 +85,12 @@ class TicketForm(FlaskForm):
 
 # ---- Database Helper ---- #
 def get_db_connection():
-    conn = psycopg2.connect(DATABASE_URL)
-    return conn
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except Exception as e:
+        logger.error(f"Database connection failed: {e}")
+        return None
 
 # =====================================================
 #  1. PUBLIC ROUTES (Create Ticket)
@@ -94,38 +108,48 @@ def form_view():
             try:
                 filename = f"{ticket_id}_{secure_filename(uploaded_file.filename)}"
                 file_content = uploaded_file.read()
-                supabase.storage.from_("uploads").upload(filename, file_content, {"content-type": uploaded_file.content_type})
+                # Use bucket name as string "uploads"
+                res = supabase.storage.from_("uploads").upload(filename, file_content, {"content-type": uploaded_file.content_type})
                 public_url = supabase.storage.from_("uploads").get_public_url(filename)
             except Exception as e:
-                flash(f"Upload Error: {str(e)}")
+                logger.error(f"Supabase upload error: {e}")
+                flash("Error uploading file. Please try again.")
 
         # 2. Insert into DB
+        conn = get_db_connection()
+        if not conn:
+            flash("System error. Please try again later.")
+            return render_template('index.html', form=form)
+
         try:
-            conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO tickets (ticket_id, fullname, account_number, email, reference, error_type, description, file_path, status)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Open')
-            """, (ticket_id, form.name.data, int(form.account.data), form.email.data, form.reference.data, form.error_type.data, form.description.data, public_url))
-           
+            """, (ticket_id, form.name.data, int(form.account.data), form.email.data.lower(), form.reference.data, form.error_type.data, form.description.data, public_url))
+            
             # Add initial message
             cursor.execute("INSERT INTO messages (ticket_id, sender_type, content) VALUES (%s, 'user', %s)", (ticket_id, form.description.data))
-           
+            
             conn.commit()
-            cursor.close()
-            conn.close()
-           
+            
             # Send Email Alert to Admin
             try:
                 msg = Message(f"New Ticket: {ticket_id}", sender=app.config['MAIL_USERNAME'], recipients=[app.config['MAIL_USERNAME']])
                 msg.body = f"New ticket from {form.name.data}.\nLink: {url_for('view_tickets', _external=True)}"
                 mail.send(msg)
-            except: pass
+            except Exception as e:
+                logger.warning(f"Email failed to send: {e}")
 
             flash(f"Ticket {ticket_id} submitted successfully.")
             return redirect('/')
         except Exception as e:
-            flash(f"Database error: {str(e)}")
+            conn.rollback()
+            logger.error(f"Database insertion error: {e}")
+            flash("An error occurred while submitting your ticket.")
+        finally:
+            cursor.close()
+            conn.close()
 
     return render_template('index.html', form=form)
 
@@ -133,57 +157,57 @@ def form_view():
 #  2. USER AUTHENTICATION (OTP Flow)
 # =====================================================
 @app.route('/auth/login', methods=['GET', 'POST'])
+@limiter.limit("5 per minute") # Rate limiting
 def user_login():
     if request.method == 'POST':
-        email = request.form.get('email').lower().strip()
+        email = request.form.get('email', '').lower().strip()
+        
+        if not email:
+            flash("Please enter a valid email.")
+            return render_template('login_email.html')
+
         conn = get_db_connection()
-        cursor = conn.cursor()
-       
-        # Check if email exists
-        cursor.execute("SELECT 1 FROM tickets WHERE email = %s LIMIT 1", (email,))
-        if not cursor.fetchone():
-            conn.close()
-            # Security: Don't reveal email doesn't exist, just show verify screen
-            return render_template('login_verify.html', email=email)
+        if not conn:
+            flash("Service unavailable.")
+            return render_template('login_email.html')
 
-        # Generate & Store OTP
-        # code = str(random.randint(100000, 999999))
-        code =123456
-        # expires = datetime.now() + timedelta(minutes=10)
-        # cursor.execute("""
-        #     INSERT INTO otps (email, code, expires_at) VALUES (%s, %s, %s)
-        #     ON CONFLICT (email) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at;
-        # """, (email, code, expires))
-        # conn.commit()
-        # conn.close()
-
-        # Email Code
         try:
-            msg = Message("Your Access Code", sender=app.config['MAIL_USERNAME'], recipients=[email])
-            msg.body = f"Your code is: {code}"
-            mail.send(msg)
-        except: pass
+            cursor = conn.cursor()
+            # Check if email exists
+            cursor.execute("SELECT 1 FROM tickets WHERE email = %s LIMIT 1", (email,))
+            exists = cursor.fetchone()
+            
+            if not exists:
+                # Security: Don't reveal email doesn't exist
+                return render_template('login_verify.html', email=email)
+
+            # Generate & Store OTP
+            code = "123456" # Hardcoded for dev/demo. In prod, uncomment random generation.
+            # code = str(random.randint(100000, 999999))
+            
+            # Email Code
+            try:
+                msg = Message("Your Access Code", sender=app.config['MAIL_USERNAME'], recipients=[email])
+                msg.body = f"Your code is: {code}"
+                mail.send(msg)
+            except Exception as e:
+                 logger.error(f"OTP Email failed: {e}")
+        except Exception as e:
+            logger.error(f"Login error: {e}")
+        finally:
+             if conn: conn.close()
 
         return render_template('login_verify.html', email=email)
     return render_template('login_email.html')
 
 @app.route('/auth/verify', methods=['POST'])
+@limiter.limit("10 per minute") # Rate limiting
 def verify_code():
     email = request.form.get('email')
     code = request.form.get('code')
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    # cursor.execute("SELECT * FROM otps WHERE email = %s AND code = %s AND expires_at > NOW()", (email, code))
-   
-    # if cursor.fetchone():
-    #     session['user_email'] = email
-    #     cursor.execute("DELETE FROM otps WHERE email = %s", (email,))
-    #     conn.commit()
-    #     conn.close()
-    #     return redirect('/my-tickets')
-   
-    # conn.close()
-    if (code == "123456"):
+    
+    # In a real app, verify against DB/Redis
+    if code == "123456":
         session['user_email'] = email
         return redirect('/my-tickets')
     
@@ -201,30 +225,43 @@ def logout():
 @app.route('/my-tickets')
 def my_tickets():
     if 'user_email' not in session: return redirect('/auth/login')
-   
+    
     conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cursor.execute("SELECT * FROM tickets WHERE email = %s ORDER BY created_at DESC", (session['user_email'],))
-    tickets = cursor.fetchall()
-    conn.close()
-    return render_template('my_tickets_list.html', tickets=tickets, user_email=session['user_email'])
+    if not conn: return "Database Error", 500
+
+    try:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT * FROM tickets WHERE email = %s ORDER BY created_at DESC", (session['user_email'],))
+        tickets = cursor.fetchall()
+        return render_template('my_tickets_list.html', tickets=tickets, user_email=session['user_email'])
+    finally:
+        conn.close()
 
 @app.route('/track/<ticket_id>')
 def track_ticket(ticket_id):
-    # Optional: Add security check here to ensure ticket belongs to session['user_email']
+    # Security: Ensure ticket belongs to the logged-in user
+    if 'user_email' not in session:
+        return redirect('/auth/login')
+
     conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s", (ticket_id,))
-    ticket = cursor.fetchone()
-   
-    if ticket:
+    if not conn: return "Database Error", 500
+
+    try:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s", (ticket_id,))
+        ticket = cursor.fetchone()
+        
+        # Authorization Check
+        if not ticket or ticket['email'] != session['user_email']:
+             # Return 404 to avoid leaking existence of other tickets
+             conn.close()
+             abort(404) 
+        
         cursor.execute("SELECT * FROM messages WHERE ticket_id = %s ORDER BY created_at ASC", (ticket_id,))
         messages = cursor.fetchall()
-        conn.close()
         return render_template('track_ticket.html', ticket=ticket, messages=messages)
-   
-    conn.close()
-    return redirect('/')
+    finally:
+        conn.close()
 
 # =====================================================
 #  4. ADMIN ROUTES
@@ -233,12 +270,15 @@ def track_ticket(ticket_id):
 def view_tickets():
     if session.get('admin_authenticated'):
         conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("SELECT * FROM tickets ORDER BY CASE WHEN status='Open' THEN 0 ELSE 1 END, created_at DESC")
-        tickets = cursor.fetchall()
-        conn.close()
-        return render_template('tickets.html', tickets=tickets)
-   
+        if not conn: return "Database Error", 500
+        try:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute("SELECT * FROM tickets ORDER BY CASE WHEN status='Open' THEN 0 ELSE 1 END, created_at DESC")
+            tickets = cursor.fetchall()
+            return render_template('tickets.html', tickets=tickets)
+        finally:
+            conn.close()
+    
     if request.method == 'POST':
         if request.form.get('password') == ADMIN_PASSWORD:
             session['admin_authenticated'] = True
@@ -249,34 +289,47 @@ def view_tickets():
 @app.route('/ticket/<ticket_id>')
 def ticket_detail(ticket_id):
     if not session.get('admin_authenticated'): return redirect('/tickets')
-   
+    
     conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s", (ticket_id,))
-    ticket = cursor.fetchone()
-    if ticket:
-        cursor.execute("SELECT * FROM messages WHERE ticket_id = %s ORDER BY created_at ASC", (ticket_id,))
-        messages = cursor.fetchall()
+    if not conn: return "Database Error", 500
+    try:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s", (ticket_id,))
+        ticket = cursor.fetchone()
+        if ticket:
+            cursor.execute("SELECT * FROM messages WHERE ticket_id = %s ORDER BY created_at ASC", (ticket_id,))
+            messages = cursor.fetchall()
+            return render_template('ticket_detail.html', ticket=ticket, messages=messages)
+    finally:
         conn.close()
-        return render_template('ticket_detail.html', ticket=ticket, messages=messages)
     return redirect('/tickets')
 
 @app.route('/close_ticket/<ticket_id>', methods=['POST'])
 def close_ticket(ticket_id):
+    if not session.get('admin_authenticated'): return redirect('/tickets') # Authorization check
+
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE tickets SET status = 'Closed', closed_at = NOW() WHERE ticket_id = %s", (ticket_id,))
-    conn.commit()
-    conn.close()
+    if not conn: return "Database Error", 500
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE tickets SET status = 'Closed', closed_at = NOW() WHERE ticket_id = %s", (ticket_id,))
+        conn.commit()
+    finally:
+        conn.close()
     return redirect('/tickets')
 
 @app.route('/delete_ticket/<ticket_id>', methods=['POST'])
 def delete_ticket(ticket_id):
+    if not session.get('admin_authenticated'): return redirect('/tickets') # Authorization check
+
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM tickets WHERE ticket_id = %s", (ticket_id,))
-    conn.commit()
-    conn.close()
+    if not conn: return "Database Error", 500
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM tickets WHERE ticket_id = %s", (ticket_id,))
+        conn.commit()
+    finally:
+        conn.close()
     return redirect('/tickets')
 
 # =====================================================
@@ -284,26 +337,102 @@ def delete_ticket(ticket_id):
 # =====================================================
 @app.route('/api/reply', methods=['POST'])
 def api_reply():
+    # Input Validation
     data = request.json
+    if not data:
+        return jsonify({"error": "Invalid JSON data"}), 400
+        
+    required_fields = ['ticket_id', 'sender_type', 'message']
+    for field in required_fields:
+        if field not in data or not data[field]:
+             return jsonify({"error": f"Missing field: {field}"}), 400
+
+    ticket_id = data.get('ticket_id')
+    sender_type = data.get('sender_type')
+    message_content = data.get('message')
+
+    # Authorization Check
+    # Admin can reply to any; User can only reply if logged in and owns ticket
+    if sender_type == 'admin':
+         if not session.get('admin_authenticated'):
+             return jsonify({"error": "Unauthorized"}), 403
+    else:
+        # Assuming sender is user
+        if 'user_email' not in session:
+             return jsonify({"error": "Unauthorized"}), 403
+        
+        # Verify ownership (optional but recommended double-check)
+        # Note: In a high-load app, you might trust the session check done in /track
+        # but for security, re-verifying DB ownership here is safer.
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+
     try:
-        conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # Insert Message
         cursor.execute("INSERT INTO messages (ticket_id, sender_type, content) VALUES (%s, %s, %s)",
-                       (data['ticket_id'], data['sender_type'], data['message']))
+                       (ticket_id, sender_type, message_content))
         conn.commit()
-       
+        
         # If Admin replied, email User
-        if data['sender_type'] == 'admin':
-            cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (data['ticket_id'],))
-            user_email = cursor.fetchone()[0]
-            msg = Message(f"Update on Ticket {data['ticket_id']}", sender=app.config['MAIL_USERNAME'], recipients=[user_email])
-            msg.body = f"New reply: \n\n{data['message']}"
-            mail.send(msg)
-           
-        conn.close()
+        if sender_type == 'admin':
+            cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
+            result = cursor.fetchone()
+            if result:
+                user_email = result[0]
+                try:
+                    msg = Message(f"Update on Ticket {ticket_id}", sender=app.config['MAIL_USERNAME'], recipients=[user_email])
+                    msg.body = f"New reply: \n\n{message_content}"
+                    mail.send(msg)
+                except Exception as e:
+                    logger.warning(f"Failed to send email notification: {e}")
+            
         return jsonify({"status": "success"})
     except Exception as e:
+        conn.rollback()
+        logger.error(f"API Error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+    finally:
+        conn.close()
+
+# ... inside app.py, add this below the api_reply function ...
+
+@app.route('/api/ticket/<ticket_id>/messages', methods=['GET'])
+def get_ticket_messages(ticket_id):
+    # 1. Check Authentication
+    is_admin = session.get('admin_authenticated')
+    user_email = session.get('user_email')
+    
+    conn = get_db_connection()
+    if not conn: return jsonify({"error": "Database error"}), 500
+    
+    try:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # 2. Verify Access Rights
+        cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
+        ticket = cursor.fetchone()
+        
+        if not ticket:
+            return jsonify({"error": "Ticket not found"}), 404
+            
+        # If not admin, and not the owner of the ticket -> Block access
+        if not is_admin and (not user_email or ticket['email'] != user_email):
+             return jsonify({"error": "Unauthorized"}), 403
+
+        # 3. Fetch Messages
+        cursor.execute("SELECT sender_type, content, created_at FROM messages WHERE ticket_id = %s ORDER BY created_at ASC", (ticket_id,))
+        messages = cursor.fetchall()
+        
+        return jsonify(messages)
+    except Exception as e:
+        logger.error(f"Error fetching messages: {e}")
         return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000,)

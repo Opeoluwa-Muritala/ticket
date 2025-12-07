@@ -3,6 +3,7 @@
 <head>
     <title>Ticket #{{ ticket.ticket_id }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='ticket_detail.css') }}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
 </head>
 <body>
 <div class="container">
@@ -12,42 +13,159 @@
     </div>
     <div class="ticket-dashboard">
         <aside class="ticket-sidebar">
-            <div class="sidebar-section"><span class="sidebar-label">ID</span><span class="sidebar-value">{{ ticket.ticket_id }}</span></div>
-            <div class="sidebar-section"><span class="sidebar-label">Status</span><span class="status-badge {{ ticket.status|lower }}">{{ ticket.status }}</span></div>
-            <div class="sidebar-section"><span class="sidebar-label">Reference</span><span class="sidebar-value">{{ ticket.reference or 'N/A' }}</span></div>
+            <div class="sidebar-section">
+                <span class="sidebar-label">ID</span>
+                <span class="sidebar-value">{{ ticket.ticket_id }}</span>
+            </div>
+            <div class="sidebar-section">
+                <span class="sidebar-label">Status</span>
+                <span class="status-badge {{ ticket.status|lower }}">{{ ticket.status }}</span>
+            </div>
+            <div class="sidebar-section">
+                <span class="sidebar-label">Reference</span>
+                <span class="sidebar-value">{{ ticket.reference or 'N/A' }}</span>
+            </div>
         </aside>
         <main class="ticket-main">
             <div class="panel-header">Conversation</div>
             <div class="panel-body">
                 <div class="chat-container">
                     <div class="message outgoing">
-                        <div class="msg-header"><span>Me</span><span>{{ ticket.created_at.strftime('%I:%M %p') }}</span></div>
-                        {{ ticket.description }}
+                        <div class="msg-header">
+                            <span>Me</span>
+                            <span>{{ ticket.created_at.strftime('%I:%M %p') if ticket.created_at else '' }}</span>
+                        </div>
+                        <div class="message-content">{{ ticket.description }}</div>
                     </div>
                     {% for msg in messages %}
                     <div class="message {{ 'outgoing' if msg.sender_type == 'user' else 'incoming' }}">
-                        <div class="msg-header"><span>{{ 'Me' if msg.sender_type == 'user' else 'Support' }}</span><span>{{ msg.created_at.strftime('%d %b %I:%M %p') }}</span></div>
-                        {{ msg.content }}
+                        <div class="msg-header">
+                            <span>{{ 'Me' if msg.sender_type == 'user' else 'Support' }}</span>
+                            <span>{{ msg.created_at.strftime('%d %b %I:%M %p') if msg.created_at else '' }}</span>
+                        </div>
+                        <div class="message-content">{{ msg.content }}</div>
                     </div>
                     {% endfor %}
                 </div>
-                <div class="reply-area" style="background:#fff; padding:15px; border:1px solid #ddd; border-radius:8px;">
-                    <textarea id="reply-text" style="width:100%; height:80px; padding:10px; border:1px solid #ddd; border-radius:4px;" placeholder="Type reply..."></textarea>
-                    <button onclick="sendReply()" class="btn btn-save" style="margin-top:10px;">Send Reply</button>
+                <div class="reply-container">
+                    <textarea id="reply-text" class="reply-input" placeholder="Type reply..."></textarea>
+                    <div id="error-feedback" class="error-message"></div>
+                    <button id="send-btn" onclick="sendReply()" class="btn btn-save btn-reply-submit">Send Reply</button>
                 </div>
             </div>
         </main>
     </div>
 </div>
 <script>
+    const ticketId = "{{ ticket.ticket_id }}";
+    const chatContainer = document.querySelector('.chat-container');
+
+    // 1. Function to fetch and update messages
+    async function refreshChat() {
+        try {
+            const response = await fetch(`/api/ticket/${ticketId}/messages`);
+            if (!response.ok) return; // Skip if auth fails or network error
+
+            const messages = await response.json();
+            
+            // Rebuild Chat HTML
+            let html = `
+                <div class="message outgoing">
+                    <div class="msg-header">
+                        <span>Me</span>
+                        <span>{{ ticket.created_at.strftime('%I:%M %p') if ticket.created_at else '' }}</span>
+                    </div>
+                    <div class="message-content">{{ ticket.description }}</div>
+                </div>
+            `;
+
+            messages.forEach(msg => {
+                const isMe = msg.sender_type === 'user';
+                const senderName = isMe ? 'Me' : 'Support';
+                const cssClass = isMe ? 'outgoing' : 'incoming';
+                // Simple date formatting for JS
+                const date = new Date(msg.created_at).toLocaleString('en-US', { day: 'numeric', month: 'short', hour: 'numeric', minute: 'numeric', hour12: true });
+
+                html += `
+                <div class="message ${cssClass}">
+                    <div class="msg-header"><span>${senderName}</span><span>${date}</span></div>
+                    <div class="message-content">${escapeHtml(msg.content)}</div>
+                </div>`;
+            });
+
+            // Only update if content matches to avoid jitter, 
+            // but for simplicity we replace innerHTML here.
+            // A better way is to compare lengths, but this works for basic needs.
+            chatContainer.innerHTML = html;
+            
+        } catch (error) {
+            console.error("Polling error:", error);
+        }
+    }
+
+    // 2. Poll every 3 seconds
+    setInterval(refreshChat, 3000);
+
+    // 3. Helper to prevent XSS (Security)
+    function escapeHtml(text) {
+        if (!text) return "";
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    // 4. Send Reply Logic (unchanged but included for completeness)
     async function sendReply() {
-        const text = document.getElementById('reply-text').value;
-        if(!text) return;
-        await fetch('/api/reply', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({ticket_id:'{{ ticket.ticket_id }}', sender_type:'user', message:text})
-        });
-        location.reload();
+        const textArea = document.getElementById('reply-text');
+        const sendBtn = document.getElementById('send-btn');
+        const errorBox = document.getElementById('error-feedback');
+        const text = textArea.value.trim();
+
+        errorBox.style.display = 'none';
+        if (!text) {
+            errorBox.innerText = "Please enter a message.";
+            errorBox.style.display = 'block';
+            return;
+        }
+
+        sendBtn.disabled = true;
+        sendBtn.innerText = "Sending...";
+
+        try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            
+            const response = await fetch('/api/reply', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({
+                    ticket_id: ticketId,
+                    sender_type: 'user',
+                    message: text
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                textArea.value = ""; // Clear input
+                refreshChat();       // Refresh immediately
+            } else {
+                throw new Error(data.error || 'Failed to send message.');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            errorBox.innerText = "Error: " + error.message;
+            errorBox.style.display = 'block';
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.innerText = "Send Reply";
+        }
     }
 </script>
 </body>

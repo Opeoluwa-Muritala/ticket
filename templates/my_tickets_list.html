@@ -9,22 +9,30 @@
     <div class="dashboard-header">
         <h1>My Tickets</h1>
         <div>
-            <span style="margin-right:15px; font-weight:500;">{{ user_email }}</span>
-            <a href="/auth/logout" class="btn btn-cancel">Logout</a>
+            <span class="user-email">{{ user_email }}</span>
+            <a href="{{ url_for('logout') }}" class="btn btn-cancel">Logout</a>
         </div>
     </div>
     <table class="ticket-table">
         <thead>
-            <tr><th>Ticket ID</th><th>Subject</th><th>Date</th><th>Status</th><th>Action</th></tr>
+            <tr>
+                <th>Ticket ID</th>
+                <th>Subject</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Action</th>
+            </tr>
         </thead>
         <tbody>
             {% for t in tickets %}
             <tr>
-                <td style="font-weight:bold; color:#007bff;">{{ t.ticket_id }}</td>
-                <td>{{ t.description[:50] }}...</td>
-                <td>{{ t.created_at.strftime('%Y-%m-%d') }}</td>
+                <td class="ticket-id-cell">{{ t.ticket_id }}</td>
+                <td>{{ (t.description or '')[:50] }}...</td>
+                <td>{{ t.created_at.strftime('%Y-%m-%d') if t.created_at else 'N/A' }}</td>
                 <td><span class="status-badge {{ t.status|lower }}">{{ t.status }}</span></td>
-                <td><a href="/track/{{ t.ticket_id }}" class="btn btn-save" style="padding:5px 10px;">View</a></td>
+                <td>
+                    <a href="{{ url_for('track_ticket', ticket_id=t.ticket_id) }}" class="btn btn-save btn-sm">View</a>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
