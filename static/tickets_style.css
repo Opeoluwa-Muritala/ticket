@@ -1,96 +1,79 @@
-body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  margin: 20px;
-  background: #f5f5f7;
-  color: #333;
+/* =========================================
+   1. GLOBAL & RESET (New Theme)
+   ========================================= */
+   body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 20px;
+    background: #f5f5f7; /* New background */
+    color: #333;
 }
 
 h1 {
-  text-align: center;
-  color: #4a154b;
-  margin-bottom: 2rem;
-  font-size: 2em;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+    text-align: center;
+    color: #4a154b; /* New Brand Color */
+    margin-bottom: 2rem;
+    font-size: 2em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
 
-.table-container {
-  overflow-x: auto;
-  margin: 0 auto;
-  max-width: 95%;
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+h2, h3 {
+    text-align: center;
+    color: #4a154b;
 }
 
-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  background-color: white;
-  margin-bottom: 1rem;
-}
-
-th, td {
-  padding: 12px 15px;
-  text-align: left;
-  border-bottom: 1px solid #e0e0e0;
-}
-
-th {
-  background-color: #6b4e71;
-  color: white;
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 0.9em;
-  letter-spacing: 0.5px;
-}
-
-tr:nth-child(even) {
-  background-color: #f8f6f9;
-}
-
-tr:hover {
-  background-color: #ece7ef;
-  transition: background-color 0.2s ease;
-}
-
-/* Style for action buttons */
-button {
-  background-color: #4a154b;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9em;
-  transition: background-color 0.2s ease;
-}
-
-button:hover {
-  background-color: #611f69;
-}
-
-/* Status column styling */
-td:nth-child(4) {
-  font-weight: 600;
-}
-
-/* File preview image styling */
-img {
-  border-radius: 4px;
-  border: 1px solid #e0e0e0;
-}
-
-/* Link styling */
 a {
-  color: #4a154b;
-  text-decoration: none;
+    color: #4a154b;
+    text-decoration: none;
 }
 
 a:hover {
-  text-decoration: underline;
+    text-decoration: underline;
+}
+
+/* =========================================
+   2. TABLES (Your New Styles)
+   ========================================= */
+.table-container {
+    overflow-x: auto;
+    margin: 0 auto;
+    max-width: 95%;
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background-color: white;
+    margin-bottom: 1rem;
+}
+
+th, td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+th {
+    background-color: #6b4e71;
+    color: white;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.9em;
+    letter-spacing: 0.5px;
+}
+
+tr:nth-child(even) {
+    background-color: #f8f6f9;
+}
+
+tr:hover {
+    background-color: #ece7ef;
+    transition: background-color 0.2s ease;
 }
 
 .ticket-link {
@@ -116,29 +99,323 @@ a:hover {
     position: relative;
 }
 
-/* Ensure buttons and forms don't trigger row click */
 .clickable-row button,
 .clickable-row form {
     position: relative;
     z-index: 2;
 }
 
-@media (max-width: 768px) {
-  .table-container {
+/* =========================================
+   3. BUTTONS (New Theme)
+   ========================================= */
+button, .btn {
+    background-color: #4a154b;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: background-color 0.2s ease;
+    display: inline-block;
+    text-align: center;
+    font-weight: normal; /* Resetting bold if needed */
+}
+
+button:hover, .btn:hover {
+    background-color: #611f69;
+    text-decoration: none;
+}
+
+button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+/* Specific Action Buttons */
+.btn-save, .btn-reply-submit, .btn-full {
+    background-color: #4a154b;
+}
+
+.btn-cancel, .delete-button {
+    background-color: #d9534f; /* Keep Red for dangerous actions */
+}
+
+.btn-cancel:hover, .delete-button:hover {
+    background-color: #c9302c;
+}
+
+.btn-back {
+    background-color: #e0e0e0;
+    color: #333;
+}
+
+.btn-back:hover {
+    background-color: #ccc;
+}
+
+.btn-full {
+    width: 100%;
+    padding: 12px;
+    font-size: 1rem;
+    margin-top: 10px;
+}
+
+/* =========================================
+   4. LAYOUT & DASHBOARD
+   ========================================= */
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+}
+
+.ticket-dashboard {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+/* Sidebar */
+.ticket-sidebar {
+    flex: 1;
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    min-width: 250px;
+}
+
+.sidebar-section {
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #eee;
+}
+
+.sidebar-label {
+    display: block;
+    font-size: 0.85em;
+    color: #666;
+    margin-bottom: 5px;
+    font-weight: 600;
+}
+
+.sidebar-value {
+    font-size: 1.1em;
+    font-weight: 500;
+    color: #333;
+    word-break: break-all;
+}
+
+/* Main Content */
+.ticket-main {
+    flex: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.panel-header {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #4a154b;
+    margin-bottom: 10px;
+}
+
+/* =========================================
+   5. CHAT & MESSAGING
+   ========================================= */
+.chat-container {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    padding: 20px;
+    max-height: 500px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.message {
+    padding: 12px 16px;
+    border-radius: 8px;
+    max-width: 80%;
+    position: relative;
+    line-height: 1.5;
+}
+
+.message.outgoing, 
+.message.user {
+    background-color: #4a154b; /* Matched to new theme */
+    color: white;
+    margin-left: auto;
+    border-bottom-right-radius: 2px;
+}
+
+.message.incoming, 
+.message.admin {
+    background-color: #f8f6f9; /* Matched to table stripe color */
+    color: #333;
+    margin-right: auto;
+    border-bottom-left-radius: 2px;
+    border: 1px solid #e0e0e0;
+}
+
+.msg-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75em;
+    margin-bottom: 6px;
+    opacity: 0.9;
+    font-weight: 600;
+}
+
+.message-content {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Reply Area */
+.reply-container {
+    background: #fff;
+    padding: 15px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    margin-top: 20px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.reply-input, 
+.reply-textarea {
+    width: 100%;
+    height: 80px;
+    padding: 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    resize: vertical;
+    font-family: inherit;
+    box-sizing: border-box;
+    font-size: 1rem;
+    background: #fafafa;
+}
+
+.reply-input:focus {
+    border-color: #4a154b;
+    outline: none;
+    background: #fff;
+}
+
+/* =========================================
+   6. FORMS & INPUTS
+   ========================================= */
+form {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.login-card form {
+    box-shadow: none; /* Avoid double shadow on login */
+    padding: 0;
+}
+
+label {
+    display: block;
+    margin-top: 12px;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #333;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+textarea,
+select,
+.login-input {
     padding: 10px;
-    max-width: 100%;
-  }
-  
-  table {
-    font-size: 14px;
-  }
-  
-  th, td {
-    padding: 8px;
-  }
-  
-  button {
-    padding: 6px 12px;
-    font-size: 0.8em;
-  }
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 1rem;
+    margin-bottom: 10px;
+}
+
+.otp-input {
+    text-align: center;
+    letter-spacing: 5px;
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+/* =========================================
+   7. LOGIN & UTILITIES
+   ========================================= */
+.login-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 80vh;
+}
+
+.login-card {
+    background: white;
+    padding: 40px;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+}
+
+.flash-messages {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 15px;
+    background-color: #e6e0f8;
+    border: 1px solid #d6c9ef;
+    color: #4a154b;
+    border-radius: 8px;
+    list-style: none;
+    text-align: center;
+}
+
+.error-message, .error {
+    color: #cc0000;
+    font-size: 0.9rem;
+    margin-top: 5px;
+    display: block;
+}
+
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-badge.open { background-color: #d4edda; color: #155724; }
+.status-badge.closed { background-color: #e2e3e5; color: #383d41; }
+
+.visually-hidden {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;
+}
+
+@media (max-width: 768px) {
+  .table-container { padding: 10px; max-width: 100%; }
+  table { font-size: 14px; }
+  th, td { padding: 8px; }
+  .ticket-dashboard { flex-direction: column; }
+  .ticket-sidebar { width: 100%; }
 }
