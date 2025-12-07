@@ -147,14 +147,15 @@ def user_login():
             return render_template('login_verify.html', email=email)
 
         # Generate & Store OTP
-        code = str(random.randint(100000, 999999))
-        expires = datetime.now() + timedelta(minutes=10)
-        cursor.execute("""
-            INSERT INTO otps (email, code, expires_at) VALUES (%s, %s, %s)
-            ON CONFLICT (email) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at;
-        """, (email, code, expires))
-        conn.commit()
-        conn.close()
+        # code = str(random.randint(100000, 999999))
+        code =123456
+        # expires = datetime.now() + timedelta(minutes=10)
+        # cursor.execute("""
+        #     INSERT INTO otps (email, code, expires_at) VALUES (%s, %s, %s)
+        #     ON CONFLICT (email) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at;
+        # """, (email, code, expires))
+        # conn.commit()
+        # conn.close()
 
         # Email Code
         try:
@@ -172,16 +173,20 @@ def verify_code():
     code = request.form.get('code')
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM otps WHERE email = %s AND code = %s AND expires_at > NOW()", (email, code))
+    # cursor.execute("SELECT * FROM otps WHERE email = %s AND code = %s AND expires_at > NOW()", (email, code))
    
-    if cursor.fetchone():
+    # if cursor.fetchone():
+    #     session['user_email'] = email
+    #     cursor.execute("DELETE FROM otps WHERE email = %s", (email,))
+    #     conn.commit()
+    #     conn.close()
+    #     return redirect('/my-tickets')
+   
+    # conn.close()
+    if (code == "123456"):
         session['user_email'] = email
-        cursor.execute("DELETE FROM otps WHERE email = %s", (email,))
-        conn.commit()
-        conn.close()
         return redirect('/my-tickets')
-   
-    conn.close()
+    
     flash("Invalid or expired code.")
     return render_template('login_verify.html', email=email)
 

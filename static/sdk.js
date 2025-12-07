@@ -1,5 +1,5 @@
 (function() {
-    const API_URL = "https://ticket-0kzh.onrender.com/api"; // CHANGE THIS TO YOUR RENDER URL
+    const API_URL = "https://ticket-0kzh.onrender.com/api";
     
     // 1. Inject CSS
     const style = document.createElement('style');
