@@ -3,22 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <!-- Google Tag Manager -->
-<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-})(window,document,'script','dataLayer','GTM-WKSVSGDC');</script>
-<!-- End Google Tag Manager -->
+  
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','GTM-WKSVSGDC');</script>
   <title>Ticket Submission</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ticket_detail.css') }}">
 </head>
 <body>
-  <!-- Google Tag Manager (noscript) -->
-<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WKSVSGDC"
-height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-<!-- End Google Tag Manager (noscript) -->
+  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WKSVSGDC"
+  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <div style="max-width: 600px; margin: 20px auto 0; text-align: right;">
+    <a href="{{ url_for('my_tickets') }}" class="btn btn-save" style="text-decoration: none;">My Tickets</a>
+  </div>
+
   <h1>Report Error</h1>
+
   <form method="POST" enctype="multipart/form-data" novalidate>
     {{ form.csrf_token }}
     
@@ -58,24 +60,13 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <span class="error">{{ error }}</span>
     {% endfor %}
 
-    <!-- Example file input in your form -->
-<label for="file">Upload Screenshot (Optional)</label>
-{{ form.file(class="file-input", accept="image/*,application/pdf") }}
-<div>
-  <img id="file-preview" src="#" alt="Image Preview" style="display:none; width:200px; height:200px; object-fit: contain;" />
-  <iframe id="pdf-preview" style="display:none; width:200px; height:200px;" frameborder="0"></iframe>
-  {% if ticket is defined and ticket.file_path %}
-    {% set url = url_for('uploaded_file', filename=ticket.file_path) %}
-    {% if ticket.file_path.lower().endswith(('.jpg','.jpeg','.png')) %}
-      <img src="{{ url }}" alt="Attachment" style="max-width:500px;height:auto;">
-    {% elif ticket.file_path.lower().endswith('.pdf') %}
-      <embed src="{{ url }}" type="application/pdf" width="700" height="500"/>
-      <p><a href="{{ url }}" target="_blank" rel="noopener">Open PDF</a></p>
-    {% else %}
-      <a href="{{ url }}">Download attachment</a>
-    {% endif %}
-  {% endif %}
-</div>
+    <label for="file">Upload Screenshot (Optional)</label>
+    {{ form.file(class="file-input", accept="image/*,application/pdf") }}
+    
+    <div>
+      <img id="file-preview" src="#" alt="Image Preview" style="display:none; width:200px; height:200px; object-fit: contain;" />
+      <iframe id="pdf-preview" style="display:none; width:200px; height:200px;" frameborder="0"></iframe>
+    </div>
 
     {% for error in form.file.errors %}
       <span class="error">{{ error }}</span>
@@ -84,43 +75,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <button type="submit">Submit Report</button>
   </form>
 
-  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script>
-  $('.file-input').on('change', function(e) {
-    var file = e.target.files[0];
-    var previewImg = $('#file-preview');
-    var previewPdf = $('#pdf-preview');
-
-    // Hide both previews initially
-    previewImg.hide();
-    previewPdf.hide();
-
-    if (file) {
-      if (file.type.match('image.*')) {
-        // Show image preview
-        var reader = new FileReader();
-        reader.onload = function(evt) {
-          previewImg.attr('src', evt.target.result + "#" + new Date().getTime()).show();
-        };
-        reader.readAsDataURL(file);
-      } else if (file.type === "application/pdf") {
-        // Show PDF preview
-        var reader = new FileReader();
-        reader.onload = function(evt) {
-          previewPdf.attr('src', evt.target.result).show();
-        };
-        reader.readAsDataURL(file);
-      }
-    }
-  });
-
-  // Disable submit button on first click to prevent multiple submissions
-  $('form').on('submit', function(){
-    $(this).find('button[type="submit"]').prop('disabled', true);
-  });
-</script>
-
-{% with messages = get_flashed_messages() %}
+  {% with messages = get_flashed_messages() %}
     {% if messages %}
       <ul class="flash-messages">
         {% for message in messages %}
@@ -129,5 +84,38 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       </ul>
     {% endif %}
   {% endwith %}
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script>
+    $('.file-input').on('change', function(e) {
+      var file = e.target.files[0];
+      var previewImg = $('#file-preview');
+      var previewPdf = $('#pdf-preview');
+
+      previewImg.hide();
+      previewPdf.hide();
+
+      if (file) {
+        if (file.type.match('image.*')) {
+          var reader = new FileReader();
+          reader.onload = function(evt) {
+            previewImg.attr('src', evt.target.result + "#" + new Date().getTime()).show();
+          };
+          reader.readAsDataURL(file);
+        } else if (file.type === "application/pdf") {
+          var reader = new FileReader();
+          reader.onload = function(evt) {
+            previewPdf.attr('src', evt.target.result).show();
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    });
+
+    $('form').on('submit', function(){
+      $(this).find('button[type="submit"]').prop('disabled', true);
+      $(this).find('button[type="submit"]').text('Submitting...');
+    });
+  </script>
 </body>
 </html>

@@ -10,11 +10,27 @@
             <h2>Verify Code</h2>
             <p>Code sent to <strong>{{ email }}</strong></p>
             <form method="POST" action="/auth/verify">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                
                 <input type="hidden" name="email" value="{{ email }}">
-                <input type="text" name="code" class="otp-input" placeholder="000000" maxlength="6" required>
-                <button type="submit" class="btn btn-save" style="width:100%;">Login</button>
+                
+                <input 
+                    type="text" 
+                    name="code" 
+                    class="otp-input" 
+                    placeholder="000000" 
+                    maxlength="6" 
+                    inputmode="numeric" 
+                    pattern="[0-9]*"
+                    oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                    aria-label="Enter 6-digit OTP code"
+                    required
+                >
+                
+                <button type="submit" class="btn btn-save btn-full">Login</button>
             </form>
-            <br><a href="/auth/login" style="color:red; font-size:12px;">Wrong Email?</a>
+            <br>
+            <a href="{{ url_for('user_login') }}" class="link-danger-small">Wrong Email?</a>
         </div>
     </div>
 </body>

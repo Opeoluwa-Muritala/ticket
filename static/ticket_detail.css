@@ -1,49 +1,414 @@
-/* GLOBAL STYLES */
-body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; color: #333; margin: 0; padding: 20px; }
-.container { max-width: 1200px; margin: 0 auto; }
+/* =========================================
+   1. GLOBAL & RESET (Your Theme)
+   ========================================= */
+   body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0; /* Reset default margin */
+    padding: 20px;
+    background: #f3f2f7; /* light lavender-gray */
+    color: #333;
+}
 
-/* BUTTONS */
-.btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; text-align: center; }
-.btn-back { background-color: #6c757d; color: white; }
-.btn-save { background-color: #007bff; color: white; }
-.btn-cancel { background-color: #dc3545; color: white; }
-.btn:hover { opacity: 0.9; }
+h1, h2, h3 {
+    text-align: center;
+    color: #4B0082; /* deep purple */
+    margin-top: 0;
+}
 
-/* AUTH SCREENS */
-.login-wrapper { display: flex; justify-content: center; align-items: center; min-height: 80vh; }
-.login-card { background: white; width: 100%; max-width: 400px; padding: 40px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center; }
-.login-card input { width: 100%; padding: 12px; margin: 15px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
-.otp-input { font-size: 24px; letter-spacing: 10px; text-align: center; font-weight: bold; width: 200px; margin: 0 auto 20px auto; display: block; }
+a {
+    text-decoration: none;
+    color: #6a0dad;
+}
 
-/* DASHBOARD LAYOUT */
-.dashboard-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
-.ticket-dashboard { display: grid; grid-template-columns: 350px 1fr; gap: 25px; align-items: start; }
-.ticket-sidebar { background: white; border-top: 4px solid #007bff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-.ticket-main { background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); overflow: hidden; }
-.sidebar-section { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #f1f1f1; }
-.sidebar-label { display: block; font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
-.sidebar-value { display: block; font-size: 15px; font-weight: 500; }
+/* =========================================
+   2. LAYOUT & DASHBOARD
+   ========================================= */
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+}
 
-/* CHAT & MESSAGES */
-.panel-header { background: #f8f9fa; padding: 15px 25px; border-bottom: 1px solid #eee; font-weight: 600; }
-.panel-body { padding: 25px; }
-.chat-container { display: flex; flex-direction: column; gap: 15px; max-height: 500px; overflow-y: auto; margin-bottom: 25px; }
-.message { padding: 12px 18px; border-radius: 12px; max-width: 75%; font-size: 15px; line-height: 1.5; position: relative; }
-.msg-header { display: flex; justify-content: space-between; font-size: 11px; color: #999; margin-bottom: 5px; }
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+}
 
-/* Message Logic */
-.message.admin { align-self: flex-start; background: #fff; border: 1px solid #e0e0e0; }
-.message.user { align-self: flex-end; background: #e3f2fd; color: #004085; }
-/* User View Logic */
-.message.incoming { align-self: flex-start; background: #fff; border: 1px solid #e0e0e0; }
-.message.outgoing { align-self: flex-end; background: #e3f2fd; color: #004085; }
+.ticket-dashboard {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
 
-/* TABLES */
-.ticket-table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; margin-top: 20px; }
-.ticket-table th { background: #e9ecef; text-align: left; padding: 15px; font-size: 13px; text-transform: uppercase; }
-.ticket-table td { padding: 15px; border-bottom: 1px solid #eee; }
+/* Sidebar (Ticket Info) */
+.ticket-sidebar {
+    flex: 1;
+    background: #ffffff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+    min-width: 250px;
+}
 
-/* STATUS BADGES */
-.status-badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
-.status-badge.open { background: #e3f2fd; color: #007bff; }
-.status-badge.closed { background: #ffebee; color: #dc3545; }
+.sidebar-section {
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #eee;
+}
+
+.sidebar-section:last-child {
+    border-bottom: none;
+}
+
+.sidebar-label {
+    display: block;
+    font-size: 0.85em;
+    color: #666;
+    margin-bottom: 5px;
+    font-weight: 600;
+}
+
+.sidebar-value {
+    font-size: 1.1em;
+    font-weight: 500;
+    color: #333;
+    word-break: break-all;
+}
+
+/* Main Content Area */
+.ticket-main {
+    flex: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.panel-header {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #4B0082;
+    margin-bottom: 10px;
+}
+
+.panel-body {
+    /* Main wrapper for chat/content */
+}
+
+/* =========================================
+   3. CHAT & MESSAGING
+   ========================================= */
+.chat-container {
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+    padding: 20px;
+    max-height: 500px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.message {
+    padding: 12px 16px;
+    border-radius: 8px;
+    max-width: 80%;
+    position: relative;
+    line-height: 1.5;
+}
+
+.message.outgoing, 
+.message.user {
+    background-color: #6a0dad; /* Your strong purple */
+    color: white;
+    margin-left: auto; /* Align right */
+    border-bottom-right-radius: 2px;
+}
+
+.message.incoming, 
+.message.admin {
+    background-color: #f1f0f5; /* Light gray/lavender mix */
+    color: #333;
+    margin-right: auto; /* Align left */
+    border-bottom-left-radius: 2px;
+}
+
+.msg-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75em;
+    margin-bottom: 6px;
+    opacity: 0.8;
+    font-weight: 600;
+}
+
+.message-content {
+    white-space: pre-wrap; /* Preserves line breaks safely */
+    word-wrap: break-word;
+}
+
+/* Reply Area */
+.reply-container {
+    background: #fff;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    margin-top: 20px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.reply-input, 
+.reply-textarea {
+    width: 100%;
+    height: 80px;
+    padding: 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    resize: vertical;
+    font-family: inherit;
+    box-sizing: border-box;
+    font-size: 1rem;
+}
+
+.reply-input:focus {
+    border-color: #6a0dad;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(106, 13, 173, 0.2);
+}
+
+/* =========================================
+   4. FORMS & INPUTS (Your Specific Styles)
+   ========================================= */
+form {
+    /* Applied only to standalone forms, not inline buttons */
+    background: #ffffff;
+    padding: 20px;
+    border-radius: 10px;
+}
+
+/* If form is inside a card (like login), handle padding there */
+.login-card form {
+    padding: 0; 
+    box-shadow: none;
+}
+
+label {
+    display: block;
+    margin-top: 12px;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #333;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+textarea,
+select,
+.login-input,
+.otp-input {
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 1rem;
+    margin-bottom: 10px;
+}
+
+.otp-input {
+    text-align: center;
+    letter-spacing: 5px;
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+/* =========================================
+   5. BUTTONS
+   ========================================= */
+button, .btn {
+    display: inline-block;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 1rem;
+    text-align: center;
+    text-decoration: none;
+    transition: background 0.3s ease;
+}
+
+/* Primary Action (Save, Send, Login) */
+.btn-save, 
+.btn-reply-submit, 
+.btn-full {
+    background-color: #6a0dad; /* strong purple */
+    color: white;
+}
+
+.btn-save:hover, 
+.btn-reply-submit:hover {
+    background-color: #4B0082; /* darker purple */
+}
+
+/* Danger Action (Delete, Close Ticket) */
+.btn-cancel, 
+.delete-button {
+    background-color: #d9534f;
+    color: white;
+}
+
+.btn-cancel:hover, 
+.delete-button:hover {
+    background-color: #c9302c;
+}
+
+/* Secondary Action (Back) */
+.btn-back {
+    background-color: #e0e0e0;
+    color: #333;
+}
+
+.btn-back:hover {
+    background-color: #ccc;
+}
+
+/* Button Modifiers */
+.btn-full {
+    width: 100%;
+    margin-top: 10px;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 0.9em;
+}
+
+.inline-form {
+    display: inline;
+}
+
+button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+/* =========================================
+   6. TABLES (My Tickets)
+   ========================================= */
+.ticket-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+
+.ticket-table th, 
+.ticket-table td {
+    padding: 15px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+
+.ticket-table th {
+    background-color: #6a0dad;
+    color: white;
+    font-weight: 600;
+}
+
+.ticket-table tr:hover {
+    background-color: #f9f9f9;
+}
+
+.ticket-id-cell {
+    font-weight: bold;
+    color: #4B0082;
+    font-family: monospace;
+}
+
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.85em;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.status-badge.open {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.status-badge.closed {
+    background-color: #e2e3e5;
+    color: #383d41;
+}
+
+/* =========================================
+   7. LOGIN & AUTH PAGES
+   ========================================= */
+.login-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 80vh;
+}
+
+.login-card {
+    background: white;
+    padding: 40px;
+    border-radius: 10px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+}
+
+.link-small, 
+.link-danger-small {
+    font-size: 0.9em;
+    margin-top: 15px;
+    display: inline-block;
+}
+
+.link-danger-small {
+    color: #d9534f;
+}
+
+/* =========================================
+   8. UTILITIES & ALERTS
+   ========================================= */
+.flash-messages {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 15px;
+    background-color: #e6e0f8; /* soft purple tint */
+    border: 1px solid #d6c9ef;
+    color: #4B0082;
+    border-radius: 8px;
+    list-style: none;
+    text-align: center;
+}
+
+.error-message, .error {
+    color: #cc0000;
+    font-size: 0.9rem;
+    margin-top: 5px;
+    display: block;
+}
+
+/* Accessibility */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}

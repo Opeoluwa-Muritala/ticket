@@ -10,10 +10,15 @@
             <h2>Check Status</h2>
             <p>Enter your email to receive an access code.</p>
             <form method="POST">
-                <input type="email" name="email" placeholder="email@example.com" required>
-                <button type="submit" class="btn btn-save" style="width:100%;">Send Code</button>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                
+                <label for="email" class="visually-hidden">Email Address</label>
+                <input type="email" id="email" name="email" placeholder="email@example.com" required class="login-input">
+                
+                <button type="submit" class="btn btn-save btn-full">Send Code</button>
             </form>
-            <br><a href="/" style="font-size:12px;">Back to Home</a>
+            <br>
+            <a href="/" class="link-small">Back to Home</a>
         </div>
     </div>
 </body>

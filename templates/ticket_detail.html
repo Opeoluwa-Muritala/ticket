@@ -3,6 +3,7 @@
 <head>
     <title>Admin: {{ ticket.ticket_id }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='ticket_detail.css') }}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
 </head>
 <body>
 <div class="container">
@@ -11,7 +12,8 @@
         <div>
             <a href="/tickets" class="btn btn-back">Back</a>
             {% if ticket.status == 'Open' %}
-            <form action="{{ url_for('close_ticket', ticket_id=ticket.ticket_id) }}" method="POST" style="display:inline;">
+            <form action="{{ url_for('close_ticket', ticket_id=ticket.ticket_id) }}" method="POST" class="inline-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn btn-cancel">Close Ticket</button>
             </form>
             {% endif %}
@@ -19,10 +21,27 @@
     </div>
     <div class="ticket-dashboard">
         <aside class="ticket-sidebar">
-            <div class="sidebar-section"><span class="sidebar-label">Name</span><span class="sidebar-value">{{ ticket.fullname }}</span></div>
-            <div class="sidebar-section"><span class="sidebar-label">Account</span><span class="sidebar-value">{{ ticket.account_number }}</span></div>
-            <div class="sidebar-section"><span class="sidebar-label">Email</span><span class="sidebar-value">{{ ticket.email }}</span></div>
-            {% if ticket.file_path %}<div class="sidebar-section"><a href="{{ ticket.file_path }}" target="_blank">View Attachment</a></div>{% endif %}
+            <div class="sidebar-section">
+                <span class="sidebar-label">Name</span>
+                <span class="sidebar-value">{{ ticket.fullname }}</span>
+            </div>
+            <div class="sidebar-section">
+                <span class="sidebar-label">Account</span>
+                <span class="sidebar-value">{{ ticket.account_number }}</span>
+            </div>
+            <div class="sidebar-section">
+                <span class="sidebar-label">Email</span>
+                <span class="sidebar-value">{{ ticket.email }}</span>
+            </div>
+            <div class="sidebar-section">
+                <span class="sidebar-label">Reference</span>
+                <span class="sidebar-value">{{ ticket.reference or 'N/A' }}</span>
+            </div>
+            {% if ticket.file_path %}
+            <div class="sidebar-section">
+                <a href="{{ ticket.file_path }}" target="_blank">View Attachment</a>
+            </div>
+            {% endif %}
         </aside>
         <main class="ticket-main">
             <div class="panel-header">Chat History</div>
@@ -30,32 +49,116 @@
                 <div class="chat-container">
                     <div class="message user">
                         <div class="msg-header"><span>User</span></div>
-                        {{ ticket.description }}
+                        <div class="message-content">{{ ticket.description }}</div>
                     </div>
                     {% for msg in messages %}
                     <div class="message {{ msg.sender_type }}">
                         <div class="msg-header"><span>{{ 'Admin' if msg.sender_type == 'admin' else 'User' }}</span></div>
-                        {{ msg.content }}
+                        <div class="message-content">{{ msg.content }}</div>
                     </div>
                     {% endfor %}
                 </div>
-                <div class="reply-area" style="background:#fff; padding:15px; border:1px solid #ddd; border-radius:8px;">
-                    <textarea id="admin-text" style="width:100%; height:80px; padding:10px; border:1px solid #ddd;" placeholder="Reply to user..."></textarea>
-                    <button onclick="sendAdminReply()" class="btn btn-save" style="margin-top:10px;">Send Reply</button>
+                
+                <div class="reply-container">
+                    <textarea id="admin-text" class="reply-input" placeholder="Reply to user..."></textarea>
+                    <div id="error-feedback" class="error-message"></div>
+                    <button id="send-btn" onclick="sendAdminReply()" class="btn btn-save btn-reply-submit">Send Reply</button>
                 </div>
             </div>
         </main>
     </div>
 </div>
 <script>
+    const ticketId = "{{ ticket.ticket_id }}";
+    const chatContainer = document.querySelector('.chat-container');
+
+    async function refreshChat() {
+        try {
+            const response = await fetch(`/api/ticket/${ticketId}/messages`);
+            if (!response.ok) return;
+
+            const messages = await response.json();
+            
+            let html = `
+                <div class="message user">
+                    <div class="msg-header"><span>User</span></div>
+                    <div class="message-content">{{ ticket.description }}</div>
+                </div>
+            `;
+
+            messages.forEach(msg => {
+                const isAdmin = msg.sender_type === 'admin';
+                const senderName = isAdmin ? 'Admin' : 'User';
+                // Admin CSS classes from your file: .admin (incoming/right) or .user (outgoing/left)
+                const cssClass = isAdmin ? 'admin' : 'user'; 
+
+                html += `
+                <div class="message ${msg.sender_type}">
+                    <div class="msg-header"><span>${senderName}</span></div>
+                    <div class="message-content">${escapeHtml(msg.content)}</div>
+                </div>`;
+            });
+
+            chatContainer.innerHTML = html;
+        } catch (error) {
+            console.error("Polling error:", error);
+        }
+    }
+
+    setInterval(refreshChat, 3000);
+
+    function escapeHtml(text) {
+        if (!text) return "";
+        return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
     async function sendAdminReply() {
-        const text = document.getElementById('admin-text').value;
-        if(!text) return;
-        await fetch('/api/reply', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({ticket_id:'{{ ticket.ticket_id }}', sender_type:'admin', message:text})
-        });
-        location.reload();
+        const textArea = document.getElementById('admin-text');
+        const sendBtn = document.getElementById('send-btn');
+        const errorBox = document.getElementById('error-feedback');
+        const text = textArea.value.trim();
+
+        errorBox.style.display = 'none';
+        if (!text) {
+            errorBox.innerText = "Message cannot be empty.";
+            errorBox.style.display = 'block';
+            return;
+        }
+
+        sendBtn.disabled = true;
+        sendBtn.innerText = "Sending...";
+
+        try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            const response = await fetch('/api/reply', {
+                method: 'POST', 
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken 
+                },
+                body: JSON.stringify({
+                    ticket_id: ticketId, 
+                    sender_type: 'admin', 
+                    message: text
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.status === 'success') {
+                textArea.value = "";
+                refreshChat();
+            } else {
+                throw new Error(data.error || 'Failed to send reply');
+            }
+        } catch (error) {
+            errorBox.innerText = "Error: " + error.message;
+            errorBox.style.display = 'block';
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.innerText = "Send Reply";
+        }
     }
 </script>
 </body>
