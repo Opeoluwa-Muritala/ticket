@@ -182,8 +182,16 @@ def user_login():
                 return render_template('login_verify.html', email=email)
 
             # Generate & Store OTP
-            code = "123456" # Hardcoded for dev/demo. In prod, uncomment random generation.
-            # code = str(random.randint(100000, 999999))
+            # code = "123456" # Hardcoded for dev/demo. In prod, uncomment random generation.
+           # Generate & Store OTP
+            code = str(random.randint(100000, 999999))
+            expires = datetime.now() + timedelta(minutes=10)
+            cursor.execute("""
+                INSERT INTO otps (email, code, expires_at) VALUES (%s, %s, %s)
+                ON CONFLICT (email) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at;
+            """, (email, code, expires))
+            conn.commit()
+            conn.close()
             
             # Email Code
             try:
@@ -205,11 +213,18 @@ def user_login():
 def verify_code():
     email = request.form.get('email')
     code = request.form.get('code')
-    
-    # In a real app, verify against DB/Redis
-    if code == "123456":
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM otps WHERE email = %s AND code = %s AND expires_at > NOW()", (email, code))
+   
+    if cursor.fetchone():
         session['user_email'] = email
+        cursor.execute("DELETE FROM otps WHERE email = %s", (email,))
+        conn.commit()
+        conn.close()
         return redirect('/my-tickets')
+   
+    conn.close()
     
     flash("Invalid or expired code.")
     return render_template('login_verify.html', email=email)
