@@ -8,7 +8,7 @@
   <h2>Admin Login</h2>
   <form method="POST">
     <label>Enter Admin Password:</label>
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="password" name="password" required>
     <button type="submit">View Tickets</button>
   </form>
