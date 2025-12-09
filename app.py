@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 import uuid
 import os
 import logging
+from threading import Thread  # <--- IMPORT THREADING
 
 # --- NEW IMPORTS FOR SMTP ---
 import smtplib
@@ -82,6 +83,20 @@ def send_email_via_smtp(recipient, subject, html_body):
     except Exception as e:
         logger.error(f"Failed to send email via SMTP: {e}")
         return False
+
+# ---- ASYNC WRAPPER ---- #
+def send_async_email(recipient, subject, html_body):
+    """
+    Wrapper to run the SMTP function in a separate thread.
+    This prevents the Gunicorn Worker Timeout.
+    """
+    # We don't strictly need app_context for smtplib unless accessing flask.current_app
+    # but it is good practice if you expand logging later.
+    try:
+        send_email_via_smtp(recipient, subject, html_body)
+    except Exception as e:
+        logger.error(f"Async Email Error: {e}")
+
 
 # ---- Form Class ---- #
 class TicketForm(FlaskForm):
@@ -165,7 +180,7 @@ def form_view():
             
             conn.commit()
             
-            # 3. Send Email Alert to Admin (Using SMTP Helper)
+            # 3. Send Email Alert to Admin (ASYNC)
             admin_email = os.getenv('MAIL_USERNAME')
             tracking_link = url_for('ticket_detail', ticket_id=ticket_id, _external=True)
             
@@ -180,7 +195,8 @@ def form_view():
                 <p style="margin-top:20px; font-size:12px; color:#666;">Or copy link: {tracking_link}</p>
             """
             
-            send_email_via_smtp(admin_email, subject, html_content)
+            # Start Thread for Email
+            Thread(target=send_async_email, args=(admin_email, subject, html_content)).start()
 
             flash(f"Ticket {ticket_id} submitted successfully.")
             return redirect('/')
@@ -230,7 +246,7 @@ def user_login():
             conn.commit()
             conn.close()
             
-            # Email Code (Using SMTP Helper)
+            # Email Code (ASYNC)
             verify_link = url_for('verify_code', email=email, _external=True)
             
             subject = "Your Access Code"
@@ -242,7 +258,8 @@ def user_login():
                 <p style="margin-top:20px; color:#666;">This code expires in 10 minutes.</p>
             """
             
-            send_email_via_smtp(email, subject, html_content)
+            # Start Thread for Email
+            Thread(target=send_async_email, args=(email, subject, html_content)).start()
                  
         except Exception as e:
             logger.error(f"Login error: {e}")
@@ -431,7 +448,7 @@ def api_reply():
                        (ticket_id, sender_type, message_content))
         conn.commit()
         
-        # If Admin replied, email User (Using SMTP Helper)
+        # If Admin replied, email User (ASYNC)
         if sender_type == 'admin':
             cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
             result = cursor.fetchone()
@@ -449,7 +466,8 @@ def api_reply():
                     <br>
                     <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Conversation</a>
                 """
-                send_email_via_smtp(user_email, subject, html_content)
+                # Start Thread for Email
+                Thread(target=send_async_email, args=(user_email, subject, html_content)).start()
             
         return jsonify({"status": "success"})
     except Exception as e:
