@@ -1,9 +1,9 @@
 from flask import Flask, render_template, request, redirect, flash, url_for, session, jsonify, abort
-from flask_mail import Mail, Message
+from flask_mail import Mail, Message  # Using Flask-Mail for Gmail
 from flask_wtf import FlaskForm
-from flask_wtf.csrf import CSRFProtect  # Added CSRF Protection
+from flask_wtf.csrf import CSRFProtect
 from flask_cors import CORS
-from flask_limiter import Limiter  # Added Rate Limiting
+from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from wtforms import StringField, TextAreaField, SelectField
 from flask_wtf.file import FileField, FileAllowed
@@ -13,9 +13,11 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import psycopg2
 import psycopg2.extras
+import random
+from datetime import datetime, timedelta
 import uuid
 import os
-import logging # Added for proper logging
+import logging
 
 load_dotenv()
 
@@ -26,20 +28,24 @@ app.secret_key = os.getenv('SECRET_KEY', 'fallback-dev-key')
 # ---- Configuration ---- #
 
 # Security & Rate Limiting
-csrf = CSRFProtect(app) # Initialize CSRF protection globally
-limiter = Limiter(key_func=get_remote_address, app=app) # Initialize Rate Limiting
+csrf = CSRFProtect(app) 
+limiter = Limiter(key_func=get_remote_address, app=app) 
 
 # Logging Configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Mail Configuration
-app.config['MAIL_SERVER'] = 'sandbox.smtp.mailtrap.io'
-app.config['MAIL_PORT'] = 2525
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+# ---- GMAIL SMTP CONFIGURATION ---- #
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
+# Your real Gmail address
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
+# Your Google App Password (16 chars) from .env
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
+
 mail = Mail(app)
 
 # Supabase Configuration
@@ -108,7 +114,7 @@ def form_view():
             try:
                 filename = f"{ticket_id}_{secure_filename(uploaded_file.filename)}"
                 file_content = uploaded_file.read()
-                # Use bucket name as string "uploads"
+                # Bucket name is "uploads"
                 res = supabase.storage.from_("uploads").upload(filename, file_content, {"content-type": uploaded_file.content_type})
                 public_url = supabase.storage.from_("uploads").get_public_url(filename)
             except Exception as e:
@@ -133,10 +139,19 @@ def form_view():
             
             conn.commit()
             
-            # Send Email Alert to Admin
+            # 3. Send Email Alert to Admin (Gmail)
+            tracking_link = url_for('ticket_detail', ticket_id=ticket_id, _external=True)
             try:
-                msg = Message(f"New Ticket: {ticket_id}", sender=app.config['MAIL_USERNAME'], recipients=[app.config['MAIL_USERNAME']])
-                msg.body = f"New ticket from {form.name.data}.\nLink: {url_for('view_tickets', _external=True)}"
+                msg = Message(f"New Ticket: {ticket_id}", recipients=[app.config['MAIL_USERNAME']])
+                msg.html = f"""
+                    <h3>New Ticket Received</h3>
+                    <p><strong>From:</strong> {form.name.data}</p>
+                    <p><strong>Account:</strong> {form.account.data}</p>
+                    <p><strong>Issue:</strong> {form.error_type.data}</p>
+                    <br>
+                    <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Ticket</a>
+                    <p style="margin-top:20px; font-size:12px; color:#666;">Or copy link: {tracking_link}</p>
+                """
                 mail.send(msg)
             except Exception as e:
                 logger.warning(f"Email failed to send: {e}")
@@ -157,7 +172,7 @@ def form_view():
 #  2. USER AUTHENTICATION (OTP Flow)
 # =====================================================
 @app.route('/auth/login', methods=['GET', 'POST'])
-@limiter.limit("5 per minute") # Rate limiting
+@limiter.limit("5 per minute")
 def user_login():
     if request.method == 'POST':
         email = request.form.get('email', '').lower().strip()
@@ -173,7 +188,6 @@ def user_login():
 
         try:
             cursor = conn.cursor()
-            # Check if email exists
             cursor.execute("SELECT 1 FROM tickets WHERE email = %s LIMIT 1", (email,))
             exists = cursor.fetchone()
             
@@ -182,8 +196,6 @@ def user_login():
                 return render_template('login_verify.html', email=email)
 
             # Generate & Store OTP
-            # code = "123456" # Hardcoded for dev/demo. In prod, uncomment random generation.
-           # Generate & Store OTP
             code = str(random.randint(100000, 999999))
             expires = datetime.now() + timedelta(minutes=10)
             cursor.execute("""
@@ -193,13 +205,22 @@ def user_login():
             conn.commit()
             conn.close()
             
-            # Email Code
+            # Email Code (Gmail)
+            verify_link = url_for('verify_code', email=email, _external=True)
             try:
-                msg = Message("Your Access Code", sender=app.config['MAIL_USERNAME'], recipients=[email])
-                msg.body = f"Your code is: {code}"
+                msg = Message("Your Access Code", recipients=[email])
+                msg.html = f"""
+                    <h3>Your Access Code: {code}</h3>
+                    <p>Please enter this code to access your dashboard.</p>
+                    <br>
+                    <a href="{verify_link}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Enter Code Now</a>
+                    <p style="margin-top:20px; color:#666;">This code expires in 10 minutes.</p>
+                """
                 mail.send(msg)
             except Exception as e:
                  logger.error(f"OTP Email failed: {e}")
+                 # Proceeding without flash to avoid leaking user existence
+                 
         except Exception as e:
             logger.error(f"Login error: {e}")
         finally:
@@ -208,11 +229,20 @@ def user_login():
         return render_template('login_verify.html', email=email)
     return render_template('login_email.html')
 
-@app.route('/auth/verify', methods=['POST'])
-@limiter.limit("10 per minute") # Rate limiting
+@app.route('/auth/verify', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")
 def verify_code():
+    # HANDLE GET (Link from Email)
+    if request.method == 'GET':
+        email = request.args.get('email')
+        if not email:
+            return redirect('/auth/login')
+        return render_template('login_verify.html', email=email)
+
+    # HANDLE POST (Form Submission)
     email = request.form.get('email')
     code = request.form.get('code')
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM otps WHERE email = %s AND code = %s AND expires_at > NOW()", (email, code))
@@ -225,7 +255,6 @@ def verify_code():
         return redirect('/my-tickets')
    
     conn.close()
-    
     flash("Invalid or expired code.")
     return render_template('login_verify.html', email=email)
 
@@ -254,7 +283,6 @@ def my_tickets():
 
 @app.route('/track/<ticket_id>')
 def track_ticket(ticket_id):
-    # Security: Ensure ticket belongs to the logged-in user
     if 'user_email' not in session:
         return redirect('/auth/login')
 
@@ -266,9 +294,7 @@ def track_ticket(ticket_id):
         cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s", (ticket_id,))
         ticket = cursor.fetchone()
         
-        # Authorization Check
         if not ticket or ticket['email'] != session['user_email']:
-             # Return 404 to avoid leaking existence of other tickets
              conn.close()
              abort(404) 
         
@@ -321,7 +347,7 @@ def ticket_detail(ticket_id):
 
 @app.route('/close_ticket/<ticket_id>', methods=['POST'])
 def close_ticket(ticket_id):
-    if not session.get('admin_authenticated'): return redirect('/tickets') # Authorization check
+    if not session.get('admin_authenticated'): return redirect('/tickets')
 
     conn = get_db_connection()
     if not conn: return "Database Error", 500
@@ -335,7 +361,7 @@ def close_ticket(ticket_id):
 
 @app.route('/delete_ticket/<ticket_id>', methods=['POST'])
 def delete_ticket(ticket_id):
-    if not session.get('admin_authenticated'): return redirect('/tickets') # Authorization check
+    if not session.get('admin_authenticated'): return redirect('/tickets')
 
     conn = get_db_connection()
     if not conn: return "Database Error", 500
@@ -352,7 +378,6 @@ def delete_ticket(ticket_id):
 # =====================================================
 @app.route('/api/reply', methods=['POST'])
 def api_reply():
-    # Input Validation
     data = request.json
     if not data:
         return jsonify({"error": "Invalid JSON data"}), 400
@@ -366,19 +391,12 @@ def api_reply():
     sender_type = data.get('sender_type')
     message_content = data.get('message')
 
-    # Authorization Check
-    # Admin can reply to any; User can only reply if logged in and owns ticket
     if sender_type == 'admin':
          if not session.get('admin_authenticated'):
              return jsonify({"error": "Unauthorized"}), 403
     else:
-        # Assuming sender is user
         if 'user_email' not in session:
              return jsonify({"error": "Unauthorized"}), 403
-        
-        # Verify ownership (optional but recommended double-check)
-        # Note: In a high-load app, you might trust the session check done in /track
-        # but for security, re-verifying DB ownership here is safer.
 
     conn = get_db_connection()
     if not conn:
@@ -386,21 +404,29 @@ def api_reply():
 
     try:
         cursor = conn.cursor()
-        
-        # Insert Message
         cursor.execute("INSERT INTO messages (ticket_id, sender_type, content) VALUES (%s, %s, %s)",
                        (ticket_id, sender_type, message_content))
         conn.commit()
         
-        # If Admin replied, email User
+        # If Admin replied, email User (Gmail)
         if sender_type == 'admin':
             cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
             result = cursor.fetchone()
             if result:
                 user_email = result[0]
+                tracking_link = url_for('track_ticket', ticket_id=ticket_id, _external=True)
+                
                 try:
-                    msg = Message(f"Update on Ticket {ticket_id}", sender=app.config['MAIL_USERNAME'], recipients=[user_email])
-                    msg.body = f"New reply: \n\n{message_content}"
+                    msg = Message(f"Update on Ticket {ticket_id}", recipients=[user_email])
+                    msg.html = f"""
+                        <h3>New Reply</h3>
+                        <p>You have a new reply regarding your ticket.</p>
+                        <blockquote style="border-left: 4px solid #ccc; padding-left: 10px; color: #555;">
+                            {message_content}
+                        </blockquote>
+                        <br>
+                        <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Conversation</a>
+                    """
                     mail.send(msg)
                 except Exception as e:
                     logger.warning(f"Failed to send email notification: {e}")
@@ -413,11 +439,8 @@ def api_reply():
     finally:
         conn.close()
 
-# ... inside app.py, add this below the api_reply function ...
-
 @app.route('/api/ticket/<ticket_id>/messages', methods=['GET'])
 def get_ticket_messages(ticket_id):
-    # 1. Check Authentication
     is_admin = session.get('admin_authenticated')
     user_email = session.get('user_email')
     
@@ -426,19 +449,15 @@ def get_ticket_messages(ticket_id):
     
     try:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        
-        # 2. Verify Access Rights
         cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
         ticket = cursor.fetchone()
         
         if not ticket:
             return jsonify({"error": "Ticket not found"}), 404
             
-        # If not admin, and not the owner of the ticket -> Block access
         if not is_admin and (not user_email or ticket['email'] != user_email):
              return jsonify({"error": "Unauthorized"}), 403
 
-        # 3. Fetch Messages
         cursor.execute("SELECT sender_type, content, created_at FROM messages WHERE ticket_id = %s ORDER BY created_at ASC", (ticket_id,))
         messages = cursor.fetchall()
         
@@ -450,4 +469,4 @@ def get_ticket_messages(ticket_id):
         conn.close()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000,)
+    app.run(host='0.0.0.0', port=5000)
