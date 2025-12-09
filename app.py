@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, redirect, flash, url_for, session, jsonify, abort
-from flask_mail import Mail, Message  # Using Flask-Mail for Gmail
 from flask_wtf import FlaskForm
 from flask_wtf.csrf import CSRFProtect
 from flask_cors import CORS
@@ -19,6 +18,11 @@ import uuid
 import os
 import logging
 
+# --- NEW IMPORTS FOR SMTP ---
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -35,19 +39,6 @@ limiter = Limiter(key_func=get_remote_address, app=app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ---- GMAIL SMTP CONFIGURATION ---- #
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USE_SSL'] = False
-# Your real Gmail address
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
-# Your Google App Password (16 chars) from .env
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
-
-mail = Mail(app)
-
 # Supabase Configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -55,6 +46,42 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+
+# ---- EMAIL HELPER FUNCTION (SMTP) ---- #
+def send_email_via_smtp(recipient, subject, html_body):
+    """
+    Sends an email using standard smtplib and MIME.
+    Uses credentials from .env file.
+    """
+    smtp_server = "smtp.gmail.com"
+    smtp_port = 587
+    sender_email = os.getenv('MAIL_USERNAME')
+    sender_password = os.getenv('MAIL_PASSWORD')
+
+    if not sender_email or not sender_password:
+        logger.error("Missing email credentials in .env file")
+        return False
+
+    try:
+        # Create Message
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = recipient
+        msg['Subject'] = subject
+        msg.attach(MIMEText(html_body, 'html'))
+
+        # Connect and Send
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls() # Secure the connection
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, recipient, msg.as_string())
+        server.quit()
+        
+        logger.info(f"Email sent successfully to {recipient}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send email via SMTP: {e}")
+        return False
 
 # ---- Form Class ---- #
 class TicketForm(FlaskForm):
@@ -114,7 +141,6 @@ def form_view():
             try:
                 filename = f"{ticket_id}_{secure_filename(uploaded_file.filename)}"
                 file_content = uploaded_file.read()
-                # Bucket name is "uploads"
                 res = supabase.storage.from_("uploads").upload(filename, file_content, {"content-type": uploaded_file.content_type})
                 public_url = supabase.storage.from_("uploads").get_public_url(filename)
             except Exception as e:
@@ -139,22 +165,22 @@ def form_view():
             
             conn.commit()
             
-            # 3. Send Email Alert to Admin (Gmail)
+            # 3. Send Email Alert to Admin (Using SMTP Helper)
+            admin_email = os.getenv('MAIL_USERNAME')
             tracking_link = url_for('ticket_detail', ticket_id=ticket_id, _external=True)
-            try:
-                msg = Message(f"New Ticket: {ticket_id}", recipients=[app.config['MAIL_USERNAME']])
-                msg.html = f"""
-                    <h3>New Ticket Received</h3>
-                    <p><strong>From:</strong> {form.name.data}</p>
-                    <p><strong>Account:</strong> {form.account.data}</p>
-                    <p><strong>Issue:</strong> {form.error_type.data}</p>
-                    <br>
-                    <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Ticket</a>
-                    <p style="margin-top:20px; font-size:12px; color:#666;">Or copy link: {tracking_link}</p>
-                """
-                mail.send(msg)
-            except Exception as e:
-                logger.warning(f"Email failed to send: {e}")
+            
+            subject = f"New Ticket: {ticket_id}"
+            html_content = f"""
+                <h3>New Ticket Received</h3>
+                <p><strong>From:</strong> {form.name.data}</p>
+                <p><strong>Account:</strong> {form.account.data}</p>
+                <p><strong>Issue:</strong> {form.error_type.data}</p>
+                <br>
+                <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Ticket</a>
+                <p style="margin-top:20px; font-size:12px; color:#666;">Or copy link: {tracking_link}</p>
+            """
+            
+            send_email_via_smtp(admin_email, subject, html_content)
 
             flash(f"Ticket {ticket_id} submitted successfully.")
             return redirect('/')
@@ -192,7 +218,6 @@ def user_login():
             exists = cursor.fetchone()
             
             if not exists:
-                # Security: Don't reveal email doesn't exist
                 return render_template('login_verify.html', email=email)
 
             # Generate & Store OTP
@@ -205,21 +230,19 @@ def user_login():
             conn.commit()
             conn.close()
             
-            # Email Code (Gmail)
+            # Email Code (Using SMTP Helper)
             verify_link = url_for('verify_code', email=email, _external=True)
-            try:
-                msg = Message("Your Access Code", recipients=[email])
-                msg.html = f"""
-                    <h3>Your Access Code: {code}</h3>
-                    <p>Please enter this code to access your dashboard.</p>
-                    <br>
-                    <a href="{verify_link}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Enter Code Now</a>
-                    <p style="margin-top:20px; color:#666;">This code expires in 10 minutes.</p>
-                """
-                mail.send(msg)
-            except Exception as e:
-                 logger.error(f"OTP Email failed: {e}")
-                 # Proceeding without flash to avoid leaking user existence
+            
+            subject = "Your Access Code"
+            html_content = f"""
+                <h3>Your Access Code: {code}</h3>
+                <p>Please enter this code to access your dashboard.</p>
+                <br>
+                <a href="{verify_link}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Enter Code Now</a>
+                <p style="margin-top:20px; color:#666;">This code expires in 10 minutes.</p>
+            """
+            
+            send_email_via_smtp(email, subject, html_content)
                  
         except Exception as e:
             logger.error(f"Login error: {e}")
@@ -408,7 +431,7 @@ def api_reply():
                        (ticket_id, sender_type, message_content))
         conn.commit()
         
-        # If Admin replied, email User (Gmail)
+        # If Admin replied, email User (Using SMTP Helper)
         if sender_type == 'admin':
             cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
             result = cursor.fetchone()
@@ -416,20 +439,17 @@ def api_reply():
                 user_email = result[0]
                 tracking_link = url_for('track_ticket', ticket_id=ticket_id, _external=True)
                 
-                try:
-                    msg = Message(f"Update on Ticket {ticket_id}", recipients=[user_email])
-                    msg.html = f"""
-                        <h3>New Reply</h3>
-                        <p>You have a new reply regarding your ticket.</p>
-                        <blockquote style="border-left: 4px solid #ccc; padding-left: 10px; color: #555;">
-                            {message_content}
-                        </blockquote>
-                        <br>
-                        <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Conversation</a>
-                    """
-                    mail.send(msg)
-                except Exception as e:
-                    logger.warning(f"Failed to send email notification: {e}")
+                subject = f"Update on Ticket {ticket_id}"
+                html_content = f"""
+                    <h3>New Reply</h3>
+                    <p>You have a new reply regarding your ticket.</p>
+                    <blockquote style="border-left: 4px solid #ccc; padding-left: 10px; color: #555;">
+                        {message_content}
+                    </blockquote>
+                    <br>
+                    <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Conversation</a>
+                """
+                send_email_via_smtp(user_email, subject, html_content)
             
         return jsonify({"status": "success"})
     except Exception as e:
