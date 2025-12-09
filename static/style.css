@@ -1,29 +1,69 @@
-body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  margin: 20px;
-  background: #f3f2f7; /* light lavender-gray */
+/* GLOBAL RESET: Crucial for fixing width issues */
+* {
+  box-sizing: border-box;
 }
 
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 20px;
+  background: #f3f2f7; /* light lavender-gray */
+  min-height: 100vh;
+}
+
+/* NEW: This controls the width of the entire page content */
+.container {
+  max-width: 600px;
+  margin: 0 auto; /* Centers the container on the screen */
+  width: 100%;
+}
+
+/* Header & Titles */
 h1, h2 {
   text-align: center;
   color: #4B0082; /* deep purple */
+  margin-bottom: 30px;
 }
 
+/* Header Actions (For the "My Tickets" button) */
+.header-actions {
+  display: flex;
+  justify-content: flex-end; /* Pushes button to the right */
+  margin-bottom: 10px;
+}
+
+/* Top Button Styling (Assuming it's a link or button) */
+.btn-top {
+  background-color: #6a0dad;
+  color: white;
+  padding: 10px 15px;
+  text-decoration: none;
+  border-radius: 6px;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.btn-top:hover {
+  background-color: #4B0082;
+}
+
+/* Form Styling */
 form {
-  max-width: 600px;
-  margin: auto;
   background: #ffffff;
-  padding: 20px;
+  padding: 30px;
   border-radius: 10px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
+  width: 100%; /* Fills the container */
 }
 
 label {
-  margin-top: 12px;
+  margin-top: 15px;
+  margin-bottom: 5px;
   font-weight: 600;
   color: #333;
+  display: block; /* Ensures label sits above input */
 }
 
 input[type="text"],
@@ -31,17 +71,23 @@ input[type="email"],
 input[type="password"],
 textarea,
 select {
-  padding: 10px;
+  padding: 12px;
   border: 1px solid #ccc;
   border-radius: 6px;
-  margin-top: 4px;
-  width: 100%;
-  box-sizing: border-box;
+  width: 100%; /* Forces input to stay inside the form */
   font-size: 1rem;
+  background-color: #fafafa;
 }
 
-button {
-  margin-top: 20px;
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: #6a0dad;
+  background-color: #fff;
+}
+
+/* Submit Button */
+button[type="submit"] {
+  margin-top: 25px;
   padding: 12px;
   background-color: #6a0dad; /* strong purple */
   color: white;
@@ -49,21 +95,26 @@ button {
   border-radius: 6px;
   cursor: pointer;
   font-weight: bold;
+  font-size: 1rem;
+  width: 100%; /* Makes button fill the width */
+  transition: background 0.3s ease;
 }
 
-button:hover {
-  background-color: #4B0082; /* darker purple */
+button[type="submit"]:hover {
+  background-color: #4B0082;
 }
 
+/* Flash Messages */
 .flash-messages {
-  max-width: 600px;
-  margin: 20px auto;
-  padding: 10px;
-  background-color: #e6e0f8; /* soft purple tint */
+  width: 100%;
+  margin-top: 20px;
+  padding: 15px;
+  background-color: #e6e0f8;
   border: 1px solid #d6c9ef;
   color: #4B0082;
   border-radius: 8px;
   list-style: none;
+  text-align: center;
 }
 
 .error {
@@ -73,6 +124,7 @@ button:hover {
   display: block;
 }
 
+/* Delete Button (Keep as is) */
 .delete-button {
     background-color: #d9534f;
     color: white;
