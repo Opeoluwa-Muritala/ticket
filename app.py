@@ -17,7 +17,6 @@ from datetime import datetime, timedelta
 import uuid
 import os
 import logging
-from threading import Thread  # <--- IMPORT THREADING
 
 # --- NEW IMPORTS FOR SMTP ---
 import smtplib
@@ -33,8 +32,8 @@ app.secret_key = os.getenv('SECRET_KEY', 'fallback-dev-key')
 # ---- Configuration ---- #
 
 # Security & Rate Limiting
-csrf = CSRFProtect(app) 
-limiter = Limiter(key_func=get_remote_address, app=app) 
+csrf = CSRFProtect(app)
+limiter = Limiter(key_func=get_remote_address, app=app)
 
 # Logging Configuration
 logging.basicConfig(level=logging.INFO)
@@ -48,19 +47,25 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
+# SMTP configuration
+SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
+SMTP_TIMEOUT = int(os.getenv('SMTP_TIMEOUT', 10))  # seconds
+SMTP_USE_STARTTLS = os.getenv('SMTP_USE_STARTTLS', 'true').lower() in ('1', 'true', 'yes')
+
 # ---- EMAIL HELPER FUNCTION (SMTP) ---- #
 def send_email_via_smtp(recipient, subject, html_body):
     """
     Sends an email using standard smtplib and MIME.
     Uses credentials from .env file.
+    Runs synchronously with a timeout and context manager to avoid hanging sockets.
+    Returns True on success, False on failure.
     """
-    smtp_server = "smtp.gmail.com"
-    smtp_port = 587
     sender_email = os.getenv('MAIL_USERNAME')
     sender_password = os.getenv('MAIL_PASSWORD')
 
     if not sender_email or not sender_password:
-        logger.error("Missing email credentials in .env file")
+        logger.error("Missing email credentials in .env file (MAIL_USERNAME / MAIL_PASSWORD)")
         return False
 
     try:
@@ -71,37 +76,34 @@ def send_email_via_smtp(recipient, subject, html_body):
         msg['Subject'] = subject
         msg.attach(MIMEText(html_body, 'html'))
 
-        # Connect and Send
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls() # Secure the connection
-        server.login(sender_email, sender_password)
-        server.sendmail(sender_email, recipient, msg.as_string())
-        server.quit()
-        
+        # Use context manager and timeout to avoid hanging
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
+            # optional EHLO/HELO
+            try:
+                server.ehlo()
+            except Exception:
+                pass
+
+            if SMTP_USE_STARTTLS:
+                server.starttls()
+                try:
+                    server.ehlo()
+                except Exception:
+                    pass
+
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+
         logger.info(f"Email sent successfully to {recipient}")
         return True
     except Exception as e:
         logger.error(f"Failed to send email via SMTP: {e}")
         return False
 
-# ---- ASYNC WRAPPER ---- #
-def send_async_email(recipient, subject, html_body):
-    """
-    Wrapper to run the SMTP function in a separate thread.
-    This prevents the Gunicorn Worker Timeout.
-    """
-    # We don't strictly need app_context for smtplib unless accessing flask.current_app
-    # but it is good practice if you expand logging later.
-    try:
-        send_email_via_smtp(recipient, subject, html_body)
-    except Exception as e:
-        logger.error(f"Async Email Error: {e}")
-
-
 # ---- Form Class ---- #
 class TicketForm(FlaskForm):
     name = StringField('Name', validators=[DataRequired()])
-    account = StringField('Account', 
+    account = StringField('Account',
         render_kw={
             "type": "text",
             "inputmode": "numeric",
@@ -170,20 +172,21 @@ def form_view():
 
         try:
             cursor = conn.cursor()
+            # store account as string to preserve leading zeros
             cursor.execute("""
                 INSERT INTO tickets (ticket_id, fullname, account_number, email, reference, error_type, description, file_path, status)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Open')
-            """, (ticket_id, form.name.data, int(form.account.data), form.email.data.lower(), form.reference.data, form.error_type.data, form.description.data, public_url))
-            
+            """, (ticket_id, form.name.data, form.account.data, form.email.data.lower(), form.reference.data, form.error_type.data, form.description.data, public_url))
+
             # Add initial message
             cursor.execute("INSERT INTO messages (ticket_id, sender_type, content) VALUES (%s, 'user', %s)", (ticket_id, form.description.data))
-            
+
             conn.commit()
-            
-            # 3. Send Email Alert to Admin (ASYNC)
+
+            # 3. Send Email Alert to Admin (SYNCHRONOUS with timeout & safety)
             admin_email = os.getenv('MAIL_USERNAME')
             tracking_link = url_for('ticket_detail', ticket_id=ticket_id, _external=True)
-            
+
             subject = f"New Ticket: {ticket_id}"
             html_content = f"""
                 <h3>New Ticket Received</h3>
@@ -194,9 +197,14 @@ def form_view():
                 <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Ticket</a>
                 <p style="margin-top:20px; font-size:12px; color:#666;">Or copy link: {tracking_link}</p>
             """
-            
-            # Start Thread for Email
-            Thread(target=send_async_email, args=(admin_email, subject, html_content)).start()
+
+            try:
+                ok = send_email_via_smtp(admin_email, subject, html_content)
+                if not ok:
+                    # already logged inside helper; surface an info message if needed
+                    logger.warning("Admin alert email failed to send.")
+            except Exception as e:
+                logger.error(f"Unexpected error sending admin alert: {e}")
 
             flash(f"Ticket {ticket_id} submitted successfully.")
             return redirect('/')
@@ -205,7 +213,10 @@ def form_view():
             logger.error(f"Database insertion error: {e}")
             flash("An error occurred while submitting your ticket.")
         finally:
-            cursor.close()
+            try:
+                cursor.close()
+            except Exception:
+                pass
             conn.close()
 
     return render_template('index.html', form=form)
@@ -218,7 +229,7 @@ def form_view():
 def user_login():
     if request.method == 'POST':
         email = request.form.get('email', '').lower().strip()
-        
+
         if not email:
             flash("Please enter a valid email.")
             return render_template('login_email.html')
@@ -232,7 +243,7 @@ def user_login():
             cursor = conn.cursor()
             cursor.execute("SELECT 1 FROM tickets WHERE email = %s LIMIT 1", (email,))
             exists = cursor.fetchone()
-            
+
             if not exists:
                 return render_template('login_verify.html', email=email)
 
@@ -245,10 +256,10 @@ def user_login():
             """, (email, code, expires))
             conn.commit()
             conn.close()
-            
-            # Email Code (ASYNC)
+
+            # Email Code (SYNCHRONOUS with timeout & safety)
             verify_link = url_for('verify_code', email=email, _external=True)
-            
+
             subject = "Your Access Code"
             html_content = f"""
                 <h3>Your Access Code: {code}</h3>
@@ -257,14 +268,24 @@ def user_login():
                 <a href="{verify_link}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Enter Code Now</a>
                 <p style="margin-top:20px; color:#666;">This code expires in 10 minutes.</p>
             """
-            
-            # Start Thread for Email
-            Thread(target=send_async_email, args=(email, subject, html_content)).start()
-                 
+
+            try:
+                ok = send_email_via_smtp(email, subject, html_content)
+                if not ok:
+                    logger.warning("OTP email failed to send to %s", email)
+                    flash("Could not send OTP email. Please try again.")
+            except Exception as e:
+                logger.error(f"Error sending OTP: {e}")
+                flash("Could not send OTP email. Please try again.")
+
         except Exception as e:
             logger.error(f"Login error: {e}")
         finally:
-             if conn: conn.close()
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
         return render_template('login_verify.html', email=email)
     return render_template('login_email.html')
@@ -282,18 +303,18 @@ def verify_code():
     # HANDLE POST (Form Submission)
     email = request.form.get('email')
     code = request.form.get('code')
-    
+
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM otps WHERE email = %s AND code = %s AND expires_at > NOW()", (email, code))
-   
+
     if cursor.fetchone():
         session['user_email'] = email
         cursor.execute("DELETE FROM otps WHERE email = %s", (email,))
         conn.commit()
         conn.close()
         return redirect('/my-tickets')
-   
+
     conn.close()
     flash("Invalid or expired code.")
     return render_template('login_verify.html', email=email)
@@ -309,7 +330,7 @@ def logout():
 @app.route('/my-tickets')
 def my_tickets():
     if 'user_email' not in session: return redirect('/auth/login')
-    
+
     conn = get_db_connection()
     if not conn: return "Database Error", 500
 
@@ -333,11 +354,11 @@ def track_ticket(ticket_id):
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s", (ticket_id,))
         ticket = cursor.fetchone()
-        
+
         if not ticket or ticket['email'] != session['user_email']:
              conn.close()
-             abort(404) 
-        
+             abort(404)
+
         cursor.execute("SELECT * FROM messages WHERE ticket_id = %s ORDER BY created_at ASC", (ticket_id,))
         messages = cursor.fetchall()
         return render_template('track_ticket.html', ticket=ticket, messages=messages)
@@ -359,7 +380,7 @@ def view_tickets():
             return render_template('tickets.html', tickets=tickets)
         finally:
             conn.close()
-    
+
     if request.method == 'POST':
         if request.form.get('password') == ADMIN_PASSWORD:
             session['admin_authenticated'] = True
@@ -370,7 +391,7 @@ def view_tickets():
 @app.route('/ticket/<ticket_id>')
 def ticket_detail(ticket_id):
     if not session.get('admin_authenticated'): return redirect('/tickets')
-    
+
     conn = get_db_connection()
     if not conn: return "Database Error", 500
     try:
@@ -421,7 +442,7 @@ def api_reply():
     data = request.json
     if not data:
         return jsonify({"error": "Invalid JSON data"}), 400
-        
+
     required_fields = ['ticket_id', 'sender_type', 'message']
     for field in required_fields:
         if field not in data or not data[field]:
@@ -447,15 +468,15 @@ def api_reply():
         cursor.execute("INSERT INTO messages (ticket_id, sender_type, content) VALUES (%s, %s, %s)",
                        (ticket_id, sender_type, message_content))
         conn.commit()
-        
-        # If Admin replied, email User (ASYNC)
+
+        # If Admin replied, email User (SYNCHRONOUS)
         if sender_type == 'admin':
             cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
             result = cursor.fetchone()
             if result:
                 user_email = result[0]
                 tracking_link = url_for('track_ticket', ticket_id=ticket_id, _external=True)
-                
+
                 subject = f"Update on Ticket {ticket_id}"
                 html_content = f"""
                     <h3>New Reply</h3>
@@ -466,9 +487,13 @@ def api_reply():
                     <br>
                     <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Conversation</a>
                 """
-                # Start Thread for Email
-                Thread(target=send_async_email, args=(user_email, subject, html_content)).start()
-            
+                try:
+                    ok = send_email_via_smtp(user_email, subject, html_content)
+                    if not ok:
+                        logger.warning("Failed to send reply notification to %s", user_email)
+                except Exception as e:
+                    logger.error(f"Error sending reply notification: {e}")
+
         return jsonify({"status": "success"})
     except Exception as e:
         conn.rollback()
@@ -481,24 +506,24 @@ def api_reply():
 def get_ticket_messages(ticket_id):
     is_admin = session.get('admin_authenticated')
     user_email = session.get('user_email')
-    
+
     conn = get_db_connection()
     if not conn: return jsonify({"error": "Database error"}), 500
-    
+
     try:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
         ticket = cursor.fetchone()
-        
+
         if not ticket:
             return jsonify({"error": "Ticket not found"}), 404
-            
+
         if not is_admin and (not user_email or ticket['email'] != user_email):
              return jsonify({"error": "Unauthorized"}), 403
 
         cursor.execute("SELECT sender_type, content, created_at FROM messages WHERE ticket_id = %s ORDER BY created_at ASC", (ticket_id,))
         messages = cursor.fetchall()
-        
+
         return jsonify(messages)
     except Exception as e:
         logger.error(f"Error fetching messages: {e}")
