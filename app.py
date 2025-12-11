@@ -17,11 +17,7 @@ from datetime import datetime, timedelta
 import uuid
 import os
 import logging
-
-# --- NEW IMPORTS FOR SMTP ---
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import requests
 
 load_dotenv()
 
@@ -53,53 +49,42 @@ SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
 SMTP_TIMEOUT = int(os.getenv('SMTP_TIMEOUT', 10))  # seconds
 SMTP_USE_STARTTLS = os.getenv('SMTP_USE_STARTTLS', 'true').lower() in ('1', 'true', 'yes')
 
+#URL mail microservice
+EMAIL_SERVICE_URL = os.getenv("EMAIL_SERVICE_URL")  # e.g. "https://email-service.onrender.com/send"
+
 # ---- EMAIL HELPER FUNCTION (SMTP) ---- #
 def send_email_via_smtp(recipient, subject, html_body):
     """
-    Sends an email using standard smtplib and MIME.
-    Uses credentials from .env file.
-    Runs synchronously with a timeout and context manager to avoid hanging sockets.
-    Returns True on success, False on failure.
+    Sends email by calling the FastAPI email microservice.
+    Returns True if successful, False otherwise.
     """
-    sender_email = os.getenv('MAIL_USERNAME')
-    sender_password = os.getenv('MAIL_PASSWORD')
-
-    if not sender_email or not sender_password:
-        logger.error("Missing email credentials in .env file (MAIL_USERNAME / MAIL_PASSWORD)")
+    if not EMAIL_SERVICE_URL:
+        logger.error("EMAIL_SERVICE_URL not set in environment variables")
         return False
 
     try:
-        # Create Message
-        msg = MIMEMultipart()
-        msg['From'] = sender_email
-        msg['To'] = recipient
-        msg['Subject'] = subject
-        msg.attach(MIMEText(html_body, 'html'))
+        response = requests.post(
+            EMAIL_SERVICE_URL,
+            json={
+                "to": recipient,
+                "subject": subject,
+                "html": html_body
+            },
+            timeout=10  # avoid hanging
+        )
+        res_json = response.json()
 
-        # Use context manager and timeout to avoid hanging
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
-            # optional EHLO/HELO
-            try:
-                server.ehlo()
-            except Exception:
-                pass
+        if res_json.get("success"):
+            logger.info(f"Email sent successfully to {recipient} via service")
+            return True
+        else:
+            logger.error(f"Email service returned error: {res_json.get('error')}")
+            return False
 
-            if SMTP_USE_STARTTLS:
-                server.starttls()
-                try:
-                    server.ehlo()
-                except Exception:
-                    pass
-
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-
-        logger.info(f"Email sent successfully to {recipient}")
-        return True
     except Exception as e:
-        logger.error(f"Failed to send email via SMTP: {e}")
+        logger.error(f"Failed to contact email service: {e}")
         return False
-
+        
 # ---- Form Class ---- #
 class TicketForm(FlaskForm):
     name = StringField('Name', validators=[DataRequired()])
