@@ -8,4 +8,5 @@ psycopg2-binary
 supabase
 python-dotenv
 gunicorn
+requests
 Flask-Limiter
