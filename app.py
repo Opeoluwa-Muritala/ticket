@@ -50,7 +50,7 @@ SMTP_TIMEOUT = int(os.getenv('SMTP_TIMEOUT', 10))  # seconds
 SMTP_USE_STARTTLS = os.getenv('SMTP_USE_STARTTLS', 'true').lower() in ('1', 'true', 'yes')
 
 #URL mail microservice
-EMAIL_SERVICE_URL = os.getenv("EMAIL_SERVICE_URL")  # e.g. "https://email-service.onrender.com/send"
+EMAIL_SERVICE_URL = os.getenv("EMAIL_SERVICE_URL")  # e.g. "https://droid.pythonanywhere.com/"
 
 # ---- EMAIL HELPER FUNCTION (SMTP) ---- #
 def send_email_via_smtp(recipient, subject, html_body):
