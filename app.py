@@ -242,17 +242,45 @@ def user_login():
             conn.commit()
             conn.close()
 
-            # Email Code (SYNCHRONOUS with timeout & safety)
+           # Inside /auth/login route...
+
+            # Email Code (SYNCHRONOUS)
             verify_link = url_for('verify_code', email=email, _external=True)
 
             subject = "Your Access Code"
+            
+            # --- PROFESSIONAL OTP TEMPLATE --- #
             html_content = f"""
-                <h3>Your Access Code: {code}</h3>
-                <p>Please enter this code to access your dashboard.</p>
-                <br>
-                <a href="{verify_link}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Enter Code Now</a>
-                <p style="margin-top:20px; color:#666;">This code expires in 10 minutes.</p>
+            <!DOCTYPE html>
+            <html>
+            <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f8;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center;">
+                        
+                        <h2 style="color: #333333; margin-top: 0;">Verify Your Login</h2>
+                        <p style="color: #666666; font-size: 16px;">
+                            Use the code below to access your dashboard.
+                        </p>
+
+                        <div style="background-color: #eef2f7; padding: 20px; margin: 30px 0; border-radius: 8px; letter-spacing: 5px;">
+                            <span style="font-size: 32px; font-weight: bold; color: #2c3e50; font-family: monospace;">{code}</span>
+                        </div>
+
+                        <a href="{verify_link}" 
+                           style="background-color: #28a745; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+                            Verify Automatically
+                        </a>
+
+                        <p style="margin-top: 30px; font-size: 12px; color: #999999;">
+                            This code will expire in 10 minutes.<br>
+                            If you didn't request this code, you can safely ignore this email.
+                        </p>
+                    </div>
+                </div>
+            </body>
+            </html>
             """
+            # --------------------------------- #
 
             try:
                 ok = send_email_via_smtp(email, subject, html_content)
@@ -437,6 +465,7 @@ def api_reply():
     sender_type = data.get('sender_type')
     message_content = data.get('message')
 
+    # Authorization Check
     if sender_type == 'admin':
          if not session.get('admin_authenticated'):
              return jsonify({"error": "Unauthorized"}), 403
@@ -458,20 +487,49 @@ def api_reply():
         if sender_type == 'admin':
             cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
             result = cursor.fetchone()
+            
             if result:
                 user_email = result[0]
                 tracking_link = url_for('track_ticket', ticket_id=ticket_id, _external=True)
 
                 subject = f"Update on Ticket {ticket_id}"
+
+                # --- NEW PROFESSIONAL HTML TEMPLATE --- #
                 html_content = f"""
-                    <h3>New Reply</h3>
-                    <p>You have a new reply regarding your ticket.</p>
-                    <blockquote style="border-left: 4px solid #ccc; padding-left: 10px; color: #555;">
-                        {message_content}
-                    </blockquote>
-                    <br>
-                    <a href="{tracking_link}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Conversation</a>
+                <!DOCTYPE html>
+                <html>
+                <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f8;">
+                    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                        <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                            
+                            <h2 style="color: #333333; margin-top: 0; font-size: 24px;">New Reply Received</h2>
+                            <p style="color: #666666; font-size: 16px; line-height: 1.5;">
+                                There is a new update regarding your ticket <strong>#{ticket_id}</strong>.
+                            </p>
+
+                            <div style="background-color: #f8f9fa; border-left: 5px solid #007bff; padding: 15px 20px; margin: 25px 0; border-radius: 4px;">
+                                <p style="margin: 0; color: #555555; font-style: italic; font-size: 16px;">
+                                    "{message_content}"
+                                </p>
+                            </div>
+
+                            <div style="text-align: center; margin-top: 30px;">
+                                <a href="{tracking_link}" 
+                                   style="background-color: #007bff; color: #ffffff; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+                                    View Full Conversation
+                                </a>
+                            </div>
+
+                            <p style="margin-top: 30px; font-size: 12px; color: #999999; text-align: center;">
+                                If you did not submit this ticket, please ignore this email.
+                            </p>
+                        </div>
+                    </div>
+                </body>
+                </html>
                 """
+                # ------------------------------------- #
+
                 try:
                     ok = send_email_via_smtp(user_email, subject, html_content)
                     if not ok:
@@ -486,7 +544,6 @@ def api_reply():
         return jsonify({"error": "Internal server error"}), 500
     finally:
         conn.close()
-
 @app.route('/api/ticket/<ticket_id>/messages', methods=['GET'])
 def get_ticket_messages(ticket_id):
     is_admin = session.get('admin_authenticated')
