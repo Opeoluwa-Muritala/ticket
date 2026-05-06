@@ -10,3 +10,5 @@ python-dotenv
 gunicorn
 requests
 Flask-Limiter
+bcrypt
+PyJWT
