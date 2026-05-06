@@ -11,12 +11,15 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import psycopg2
 import psycopg2.extras
+from psycopg2.extras import Json
 from datetime import datetime, timedelta, timezone
 import uuid
 import os
 import logging
 import requests
 import secrets
+import ipaddress
+from urllib.parse import urlparse
 import hashlib
 import hmac
 import bcrypt
@@ -117,6 +120,16 @@ EMAIL_SERVICE_URL = os.environ["EMAIL_SERVICE_URL"]
 ADMIN_NOTIFICATION_EMAIL = os.environ["MAIL_USERNAME"]
 
 ADMIN_ROLES = {"support", "manager", "super_admin"}
+DEFAULT_ORG_SLUG = os.getenv("DEFAULT_ORG_SLUG", "default").lower().strip()
+DEFAULT_ORG_NAME = os.getenv("DEFAULT_ORG_NAME", "Default Organisation")
+DEFAULT_ORG_PRIMARY_DOMAIN = os.getenv("DEFAULT_ORG_PRIMARY_DOMAIN", "").lower().strip() or None
+DEFAULT_ORG_ALLOWED_DOMAINS = [
+    domain.strip().lower()
+    for domain in os.getenv("DEFAULT_ORG_ALLOWED_DOMAINS", "").split(",")
+    if domain.strip()
+]
+if DEFAULT_ORG_PRIMARY_DOMAIN and DEFAULT_ORG_PRIMARY_DOMAIN not in DEFAULT_ORG_ALLOWED_DOMAINS:
+    DEFAULT_ORG_ALLOWED_DOMAINS.append(DEFAULT_ORG_PRIMARY_DOMAIN)
 
 # =====================================================
 #  DATABASE HELPERS
@@ -142,6 +155,183 @@ def db_cursor(cursor_factory=None):
     finally:
         conn.close()
 
+
+
+# =====================================================
+#  MULTI-TENANCY HELPERS
+# =====================================================
+
+def normalize_host(value: str) -> str:
+    return (value or "").split(":")[0].strip().lower()
+
+
+def current_request_host() -> str:
+    forwarded_host = request.headers.get("X-Forwarded-Host")
+    return normalize_host(forwarded_host or request.host)
+
+
+def resolve_org():
+    """Resolve tenant by request host, falling back to DEFAULT_ORG_SLUG."""
+    if hasattr(g, "org"):
+        return g.org
+
+    host = current_request_host()
+    with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+        cursor.execute(
+            """
+            SELECT *
+            FROM organisations
+            WHERE is_active = TRUE
+              AND status = 'active'
+              AND (
+                    lower(primary_domain) = %s
+                    OR EXISTS (
+                        SELECT 1
+                        FROM unnest(allowed_domains) AS d(domain)
+                        WHERE lower(d.domain) = %s
+                    )
+                    OR slug = %s
+                  )
+            ORDER BY
+                CASE
+                    WHEN lower(primary_domain) = %s THEN 0
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM unnest(allowed_domains) AS d(domain)
+                        WHERE lower(d.domain) = %s
+                    ) THEN 1
+                    WHEN slug = %s THEN 2
+                    ELSE 3
+                END
+            LIMIT 1
+            """,
+            (host, host, DEFAULT_ORG_SLUG, host, host, DEFAULT_ORG_SLUG),
+        )
+        org = cursor.fetchone()
+
+    if not org:
+        abort(404, description="Organisation not configured for this domain.")
+
+    g.org = org
+    return org
+
+
+def get_org_id_for_admin(admin_payload: dict):
+    return admin_payload.get("org_id")
+
+
+def get_default_org_id(cursor):
+    cursor.execute("SELECT id FROM organisations WHERE slug = %s", (DEFAULT_ORG_SLUG,))
+    row = cursor.fetchone()
+    if isinstance(row, dict):
+        return row["id"]
+    return row[0] if row else None
+
+
+def get_ticket_due_at(cursor, org_id, priority: str = "normal"):
+    cursor.execute(
+        "SELECT resolution_minutes FROM ticket_sla WHERE org_id = %s AND priority = %s",
+        (org_id, priority),
+    )
+    row = cursor.fetchone()
+    minutes = 4320
+    if row:
+        minutes = row["resolution_minutes"] if isinstance(row, dict) else row[0]
+    return now_utc() + timedelta(minutes=int(minutes))
+
+
+def safe_request_ip():
+    raw_ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
+    try:
+        return str(ipaddress.ip_address(raw_ip))
+    except Exception:
+        return None
+
+
+def write_audit_log(cursor, *, org_id, actor_type, actor_id, action, entity_type, entity_id=None, before_data=None, after_data=None):
+    cursor.execute(
+        """
+        INSERT INTO audit_logs
+            (org_id, actor_type, actor_id, action, entity_type, entity_id, before_data, after_data, ip_address, user_agent)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            org_id,
+            actor_type,
+            str(actor_id) if actor_id else None,
+            action,
+            entity_type,
+            str(entity_id) if entity_id else None,
+            Json(before_data) if before_data is not None else None,
+            Json(after_data) if after_data is not None else None,
+            safe_request_ip(),
+            request.headers.get("User-Agent"),
+        ),
+    )
+
+
+def hash_api_secret(secret: str) -> str:
+    return hmac.new(JWT_SECRET_KEY.encode("utf-8"), secret.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def generate_api_key_pair(org_slug: str, version: int):
+    public_key = f"pk_{org_slug}_{version}_{secrets.token_urlsafe(12)}"
+    secret_key = f"sk_{secrets.token_urlsafe(32)}"
+    return public_key, secret_key
+
+
+def verify_org_api_key(public_key: str, secret_key: str):
+    if not public_key or not secret_key:
+        return None
+    with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+        cursor.execute(
+            """
+            SELECT k.*, o.slug AS org_slug
+            FROM org_api_keys k
+            JOIN organisations o ON o.id = k.org_id
+            WHERE k.public_key = %s
+              AND k.status IN ('active', 'grace')
+              AND (k.grace_expires_at IS NULL OR k.grace_expires_at > NOW())
+              AND o.is_active = TRUE
+              AND o.status = 'active'
+            LIMIT 1
+            """,
+            (public_key,),
+        )
+        row = cursor.fetchone()
+    if not row:
+        return None
+    if not constant_time_equals(hash_api_secret(secret_key), row["secret_key_hash"]):
+        return None
+    return row
+
+
+@app.after_request
+def apply_dynamic_cors(response):
+    """Restrict CORS to the resolved tenant's registered domains."""
+    origin = request.headers.get("Origin")
+    if not origin or allowed_origins:
+        return response
+
+    try:
+        parsed = urlparse(origin)
+        origin_host = normalize_host(parsed.netloc)
+        org = resolve_org()
+        allowed = {normalize_host(org.get("primary_domain"))}
+        allowed.update(normalize_host(domain) for domain in (org.get("allowed_domains") or []))
+        allowed.discard("")
+
+        if origin_host in allowed:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-CSRFToken"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    except Exception:
+        # Never fail the real request because of CORS header calculation.
+        pass
+
+    return response
 
 # =====================================================
 #  SECURITY HELPERS
@@ -183,6 +373,7 @@ def create_admin_jwt(admin: dict) -> str:
         "sub": str(admin["id"]),
         "email": admin["email"],
         "role": admin["role"],
+        "org_id": str(admin["org_id"]),
         "iat": int(issued_at.timestamp()),
         "exp": int(expires_at.timestamp()),
         "typ": "admin_access",
@@ -198,6 +389,8 @@ def decode_admin_jwt(token: str):
         if payload.get("typ") != "admin_access":
             return None
         if payload.get("role") not in ADMIN_ROLES:
+            return None
+        if not payload.get("org_id"):
             return None
         return payload
     except jwt.ExpiredSignatureError:
@@ -257,6 +450,7 @@ def admin_required(*allowed_roles):
                 "id": admin["sub"],
                 "email": admin["email"],
                 "role": admin["role"],
+                "org_id": admin["org_id"],
             }
             return set_admin_cookie(response, refreshed_payload)
         return wrapper
@@ -277,6 +471,60 @@ def enforce_https():
     return redirect(request.url.replace("http://", "https://", 1), code=301)
 
 
+def bootstrap_default_org_if_required():
+    with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO organisations (name, slug, primary_domain, allowed_domains, support_email)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (slug) DO UPDATE SET
+                name = EXCLUDED.name,
+                primary_domain = COALESCE(organisations.primary_domain, EXCLUDED.primary_domain),
+                allowed_domains = CASE
+                    WHEN organisations.allowed_domains = '{}' THEN EXCLUDED.allowed_domains
+                    ELSE organisations.allowed_domains
+                END,
+                support_email = COALESCE(organisations.support_email, EXCLUDED.support_email)
+            RETURNING id
+            """,
+            (
+                DEFAULT_ORG_NAME,
+                DEFAULT_ORG_SLUG,
+                DEFAULT_ORG_PRIMARY_DOMAIN,
+                DEFAULT_ORG_ALLOWED_DOMAINS,
+                ADMIN_NOTIFICATION_EMAIL,
+            ),
+        )
+        org = cursor.fetchone()
+        org_id = org["id"]
+
+        cursor.execute(
+            """
+            INSERT INTO org_branding (org_id)
+            VALUES (%s)
+            ON CONFLICT (org_id) DO NOTHING
+            """,
+            (org_id,),
+        )
+
+        for priority, first_response, resolution in (
+            ("low", 480, 10080),
+            ("normal", 240, 4320),
+            ("high", 60, 1440),
+            ("urgent", 15, 240),
+        ):
+            cursor.execute(
+                """
+                INSERT INTO ticket_sla (org_id, priority, first_response_minutes, resolution_minutes)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (org_id, priority) DO NOTHING
+                """,
+                (org_id, priority, first_response, resolution),
+            )
+
+        return org_id
+
+
 def bootstrap_admin_if_required():
     bootstrap_email = os.getenv("ADMIN_BOOTSTRAP_EMAIL", "").lower().strip()
     bootstrap_password = os.getenv("ADMIN_BOOTSTRAP_PASSWORD", "")
@@ -285,24 +533,30 @@ def bootstrap_admin_if_required():
     if bootstrap_role not in ADMIN_ROLES:
         raise RuntimeError("ADMIN_BOOTSTRAP_ROLE must be one of: support, manager, super_admin")
 
+    org_id = bootstrap_default_org_if_required()
+
     with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-        cursor.execute("SELECT COUNT(*) AS count FROM admins")
+        cursor.execute("SELECT COUNT(*) AS count FROM admins WHERE org_id = %s", (org_id,))
         admin_count = cursor.fetchone()["count"]
 
         if admin_count == 0:
             if not bootstrap_email or not bootstrap_password:
                 raise RuntimeError(
-                    "No admin users exist. Set ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD for first startup."
+                    "No admin users exist for this org. Set ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD for first startup."
                 )
             if len(bootstrap_password) < 12:
                 raise RuntimeError("ADMIN_BOOTSTRAP_PASSWORD must be at least 12 characters long.")
 
             cursor.execute(
                 """
-                INSERT INTO admins (email, password_hash, role, is_active)
-                VALUES (%s, %s, %s, TRUE)
+                INSERT INTO admins (org_id, email, password_hash, role, is_active, mfa_method, mfa_enabled)
+                VALUES (%s, %s, %s, %s, TRUE, 'email_otp', TRUE)
+                ON CONFLICT (email) DO UPDATE SET
+                    org_id = EXCLUDED.org_id,
+                    role = EXCLUDED.role,
+                    is_active = TRUE
                 """,
-                (bootstrap_email, hash_password(bootstrap_password), bootstrap_role),
+                (org_id, bootstrap_email, hash_password(bootstrap_password), bootstrap_role),
             )
             logger.warning("Created initial bootstrap admin account for %s. Rotate this password immediately.", bootstrap_email)
 
@@ -394,16 +648,19 @@ class TicketForm(FlaskForm):
 @app.route("/", methods=["GET", "POST"])
 @limiter.limit("20 per hour")
 def form_view():
+    org = resolve_org()
     form = TicketForm()
     if form.validate_on_submit():
         ticket_id = f"TICKET-{str(uuid.uuid4())[:8]}"
         public_url = None
         uploaded_file = form.file.data
+        priority = "normal"
+        channel = "web"
 
-        # File security hardening is Phase 2. This keeps your current storage behaviour for now.
+        # File magic-byte validation and AV scanning are handled in the file-upload hardening phase.
         if uploaded_file:
             try:
-                filename = f"{ticket_id}_{uuid.uuid4()}"
+                filename = f"{org['slug']}/{uuid.uuid4()}"
                 file_content = uploaded_file.read()
                 supabase.storage.from_("uploads").upload(filename, file_content, {"content-type": uploaded_file.content_type})
                 public_url = supabase.storage.from_("uploads").get_public_url(filename)
@@ -413,13 +670,17 @@ def form_view():
 
         try:
             with db_cursor() as cursor:
+                due_at = get_ticket_due_at(cursor, org["id"], priority)
                 cursor.execute(
                     """
-                    INSERT INTO tickets (ticket_id, fullname, account_number, email, reference, error_type, description, file_path, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Open')
+                    INSERT INTO tickets
+                        (ticket_id, org_id, fullname, account_number, email, reference, error_type,
+                         description, file_path, status, priority, channel, due_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'Open', %s, %s, %s)
                     """,
                     (
                         ticket_id,
+                        org["id"],
                         form.name.data,
                         form.account.data,
                         form.email.data.lower().strip(),
@@ -427,17 +688,31 @@ def form_view():
                         form.error_type.data,
                         form.description.data,
                         public_url,
+                        priority,
+                        channel,
+                        due_at,
                     ),
                 )
                 cursor.execute(
                     "INSERT INTO messages (ticket_id, sender_type, content) VALUES (%s, 'user', %s)",
                     (ticket_id, form.description.data),
                 )
+                write_audit_log(
+                    cursor,
+                    org_id=org["id"],
+                    actor_type="user",
+                    actor_id=form.email.data.lower().strip(),
+                    action="ticket.created",
+                    entity_type="ticket",
+                    entity_id=ticket_id,
+                    after_data={"status": "Open", "priority": priority, "channel": channel},
+                )
 
             tracking_link = url_for("ticket_detail", ticket_id=ticket_id, _external=True)
             subject = f"New Ticket: {ticket_id}"
             html_content = f"""
                 <h3>New Ticket Received</h3>
+                <p><strong>Organisation:</strong> {html_escape(org['name'])}</p>
                 <p><strong>From:</strong> {html_escape(form.name.data)}</p>
                 <p><strong>Account:</strong> {html_escape(form.account.data)}</p>
                 <p><strong>Issue:</strong> {html_escape(form.error_type.data)}</p>
@@ -455,7 +730,7 @@ def form_view():
             logger.error("Ticket submission error: %s", e)
             flash("An error occurred while submitting your ticket.")
 
-    return render_template("index.html", form=form)
+    return render_template("index.html", form=form, org=org)
 
 
 # =====================================================
@@ -464,6 +739,7 @@ def form_view():
 @app.route("/auth/login", methods=["GET", "POST"])
 @limiter.limit("5 per minute")
 def user_login():
+    org = resolve_org()
     if request.method == "POST":
         email = request.form.get("email", "").lower().strip()
 
@@ -474,7 +750,7 @@ def user_login():
 
         try:
             with db_cursor() as cursor:
-                cursor.execute("SELECT 1 FROM tickets WHERE email = %s LIMIT 1", (email,))
+                cursor.execute("SELECT 1 FROM tickets WHERE org_id = %s AND email = %s LIMIT 1", (org["id"], email))
                 exists = cursor.fetchone()
 
                 if exists:
@@ -482,16 +758,16 @@ def user_login():
                     expires = now_utc() + timedelta(minutes=10)
                     cursor.execute(
                         """
-                        INSERT INTO otps (email, code, code_hash, expires_at, failed_attempts, locked_until)
-                        VALUES (%s, NULL, %s, %s, 0, NULL)
-                        ON CONFLICT (email) DO UPDATE SET
+                        INSERT INTO otps (org_id, email, code, code_hash, expires_at, failed_attempts, locked_until)
+                        VALUES (%s, %s, NULL, %s, %s, 0, NULL)
+                        ON CONFLICT (org_id, email) DO UPDATE SET
                             code = NULL,
                             code_hash = EXCLUDED.code_hash,
                             expires_at = EXCLUDED.expires_at,
                             failed_attempts = 0,
                             locked_until = NULL;
                         """,
-                        (email, hash_otp(code), expires),
+                        (org["id"], email, hash_otp(code), expires),
                     )
 
                     verify_link = url_for("verify_code", email=email, _external=True)
@@ -528,6 +804,7 @@ def user_login():
 @app.route("/auth/verify", methods=["GET", "POST"])
 @limiter.limit("10 per minute")
 def verify_code():
+    org = resolve_org()
     if request.method == "GET":
         email = request.args.get("email")
         if not email:
@@ -539,7 +816,7 @@ def verify_code():
 
     try:
         with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-            cursor.execute("SELECT * FROM otps WHERE email = %s", (email,))
+            cursor.execute("SELECT * FROM otps WHERE org_id = %s AND email = %s", (org["id"], email))
             otp = cursor.fetchone()
 
             if not otp:
@@ -551,7 +828,7 @@ def verify_code():
                 return render_template("login_verify.html", email=email)
 
             if otp["expires_at"] <= now_utc():
-                cursor.execute("DELETE FROM otps WHERE email = %s", (email,))
+                cursor.execute("DELETE FROM otps WHERE org_id = %s AND email = %s", (org["id"], email))
                 flash("Invalid or expired code.")
                 return render_template("login_verify.html", email=email)
 
@@ -559,14 +836,15 @@ def verify_code():
             if valid:
                 session.permanent = True
                 session["user_email"] = email
-                cursor.execute("DELETE FROM otps WHERE email = %s", (email,))
+                session["user_org_id"] = str(org["id"])
+                cursor.execute("DELETE FROM otps WHERE org_id = %s AND email = %s", (org["id"], email))
                 return redirect("/my-tickets")
 
             failed_attempts = int(otp.get("failed_attempts") or 0) + 1
             locked_until = now_utc() + timedelta(minutes=OTP_LOCKOUT_MINUTES) if failed_attempts >= 5 else None
             cursor.execute(
-                "UPDATE otps SET failed_attempts = %s, locked_until = %s WHERE email = %s",
-                (failed_attempts, locked_until, email),
+                "UPDATE otps SET failed_attempts = %s, locked_until = %s WHERE org_id = %s AND email = %s",
+                (failed_attempts, locked_until, org["id"], email),
             )
     except Exception as e:
         logger.error("OTP verification error: %s", e)
@@ -578,6 +856,7 @@ def verify_code():
 @app.route("/auth/logout")
 def logout():
     session.pop("user_email", None)
+    session.pop("user_org_id", None)
     return redirect("/")
 
 
@@ -586,12 +865,13 @@ def logout():
 # =====================================================
 @app.route("/my-tickets")
 def my_tickets():
+    org = resolve_org()
     if "user_email" not in session:
         return redirect("/auth/login")
 
     try:
         with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-            cursor.execute("SELECT * FROM tickets WHERE email = %s ORDER BY created_at DESC", (session["user_email"],))
+            cursor.execute("SELECT * FROM tickets WHERE org_id = %s AND email = %s ORDER BY created_at DESC", (org["id"], session["user_email"]))
             tickets = cursor.fetchall()
         return render_template("my_tickets_list.html", tickets=tickets, user_email=session["user_email"])
     except Exception as e:
@@ -601,12 +881,13 @@ def my_tickets():
 
 @app.route("/track/<ticket_id>")
 def track_ticket(ticket_id):
+    org = resolve_org()
     if "user_email" not in session:
         return redirect("/auth/login")
 
     try:
         with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-            cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s", (ticket_id,))
+            cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s AND org_id = %s", (ticket_id, org["id"]))
             ticket = cursor.fetchone()
             if not ticket or ticket["email"] != session["user_email"]:
                 abort(404)
@@ -749,7 +1030,11 @@ def admin_logout():
 def view_tickets():
     try:
         with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-            cursor.execute("SELECT * FROM tickets ORDER BY CASE WHEN status='Open' THEN 0 ELSE 1 END, created_at DESC")
+            cursor.execute("""
+                SELECT * FROM tickets
+                WHERE org_id = %s
+                ORDER BY CASE WHEN status='Open' THEN 0 ELSE 1 END, created_at DESC
+            """, (g.admin["org_id"],))
             tickets = cursor.fetchall()
         return render_template("tickets.html", tickets=tickets, admin=g.admin)
     except Exception as e:
@@ -762,7 +1047,7 @@ def view_tickets():
 def ticket_detail(ticket_id):
     try:
         with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-            cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s", (ticket_id,))
+            cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s AND org_id = %s", (ticket_id, g.admin["org_id"]))
             ticket = cursor.fetchone()
             if not ticket:
                 abort(404)
@@ -781,8 +1066,26 @@ def ticket_detail(ticket_id):
 @admin_required("manager", "super_admin")
 def close_ticket(ticket_id):
     try:
-        with db_cursor() as cursor:
-            cursor.execute("UPDATE tickets SET status = 'Closed', closed_at = NOW() WHERE ticket_id = %s", (ticket_id,))
+        with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute("SELECT status FROM tickets WHERE ticket_id = %s AND org_id = %s", (ticket_id, g.admin["org_id"]))
+            before = cursor.fetchone()
+            cursor.execute("""
+                UPDATE tickets
+                SET status = 'Closed', closed_at = NOW(), resolved_at = COALESCE(resolved_at, NOW())
+                WHERE ticket_id = %s AND org_id = %s
+            """, (ticket_id, g.admin["org_id"]))
+            if cursor.rowcount:
+                write_audit_log(
+                    cursor,
+                    org_id=g.admin["org_id"],
+                    actor_type="admin",
+                    actor_id=g.admin["sub"],
+                    action="ticket.closed",
+                    entity_type="ticket",
+                    entity_id=ticket_id,
+                    before_data=dict(before) if before else None,
+                    after_data={"status": "Closed"},
+                )
             if cursor.rowcount == 0:
                 abort(404)
         return redirect("/tickets")
@@ -797,8 +1100,21 @@ def close_ticket(ticket_id):
 @admin_required("super_admin")
 def delete_ticket(ticket_id):
     try:
-        with db_cursor() as cursor:
-            cursor.execute("DELETE FROM tickets WHERE ticket_id = %s", (ticket_id,))
+        with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM tickets WHERE ticket_id = %s AND org_id = %s", (ticket_id, g.admin["org_id"]))
+            before = cursor.fetchone()
+            cursor.execute("DELETE FROM tickets WHERE ticket_id = %s AND org_id = %s", (ticket_id, g.admin["org_id"]))
+            if cursor.rowcount:
+                write_audit_log(
+                    cursor,
+                    org_id=g.admin["org_id"],
+                    actor_type="admin",
+                    actor_id=g.admin["sub"],
+                    action="ticket.deleted",
+                    entity_type="ticket",
+                    entity_id=ticket_id,
+                    before_data=dict(before) if before else None,
+                )
             if cursor.rowcount == 0:
                 abort(404)
         return redirect("/tickets")
@@ -839,9 +1155,11 @@ def api_reply():
     if sender_type == "user" and not user_email:
         return jsonify({"error": "Unauthorized"}), 403
 
+    org_id = admin_payload["org_id"] if admin_payload else resolve_org()["id"]
+
     try:
         with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-            cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
+            cursor.execute("SELECT email, org_id, first_response_at FROM tickets WHERE ticket_id = %s AND org_id = %s", (ticket_id, org_id))
             ticket = cursor.fetchone()
             if not ticket:
                 return jsonify({"error": "Ticket not found"}), 404
@@ -851,8 +1169,34 @@ def api_reply():
                 return jsonify({"error": "Unauthorized"}), 403
 
             cursor.execute(
-                "INSERT INTO messages (ticket_id, sender_type, content) VALUES (%s, %s, %s)",
-                (ticket_id, sender_type, message_content),
+                """
+                INSERT INTO messages (ticket_id, sender_type, sender_admin_id, content)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (ticket_id, sender_type, admin_payload["sub"] if sender_type == "admin" else None, message_content),
+            )
+            message_row = cursor.fetchone()
+
+            if sender_type == "admin":
+                cursor.execute(
+                    """
+                    UPDATE tickets
+                    SET first_response_at = COALESCE(first_response_at, NOW())
+                    WHERE ticket_id = %s AND org_id = %s
+                    """,
+                    (ticket_id, org_id),
+                )
+
+            write_audit_log(
+                cursor,
+                org_id=org_id,
+                actor_type="admin" if sender_type == "admin" else "user",
+                actor_id=admin_payload["sub"] if sender_type == "admin" else user_email,
+                action="message.created",
+                entity_type="message",
+                entity_id=message_row["id"],
+                after_data={"ticket_id": ticket_id, "sender_type": sender_type},
             )
 
             user_email_for_notice = ticket["email"]
@@ -885,7 +1229,7 @@ def api_reply():
 
         response = jsonify({"status": "success"})
         if admin_payload:
-            response = set_admin_cookie(response, {"id": admin_payload["sub"], "email": admin_payload["email"], "role": admin_payload["role"]})
+            response = set_admin_cookie(response, {"id": admin_payload["sub"], "email": admin_payload["email"], "role": admin_payload["role"], "org_id": admin_payload["org_id"]})
         return response
     except Exception as e:
         logger.error("API Error: %s", e)
@@ -897,10 +1241,11 @@ def api_reply():
 def get_ticket_messages(ticket_id):
     admin_payload = current_admin_payload()
     user_email = session.get("user_email")
+    org_id = admin_payload["org_id"] if admin_payload else resolve_org()["id"]
 
     try:
         with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-            cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s", (ticket_id,))
+            cursor.execute("SELECT email FROM tickets WHERE ticket_id = %s AND org_id = %s", (ticket_id, org_id))
             ticket = cursor.fetchone()
             if not ticket:
                 return jsonify({"error": "Ticket not found"}), 404
@@ -916,10 +1261,126 @@ def get_ticket_messages(ticket_id):
 
         response = jsonify(messages)
         if admin_payload:
-            response = set_admin_cookie(response, {"id": admin_payload["sub"], "email": admin_payload["email"], "role": admin_payload["role"]})
+            response = set_admin_cookie(response, {"id": admin_payload["sub"], "email": admin_payload["email"], "role": admin_payload["role"], "org_id": admin_payload["org_id"]})
         return response
     except Exception as e:
         logger.error("Error fetching messages: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
+
+
+# =====================================================
+#  6. ORG API KEY ROTATION
+# =====================================================
+@app.route("/admin/api-keys", methods=["GET"])
+@admin_required("super_admin")
+def list_org_api_keys():
+    try:
+        with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id, key_version, public_key, secret_key_last4, status,
+                       activated_at, grace_expires_at, revoked_at, created_at
+                FROM org_api_keys
+                WHERE org_id = %s
+                ORDER BY key_version DESC
+                """,
+                (g.admin["org_id"],),
+            )
+            keys = cursor.fetchall()
+        response = jsonify(keys)
+        return set_admin_cookie(response, {"id": g.admin["sub"], "email": g.admin["email"], "role": g.admin["role"], "org_id": g.admin["org_id"]})
+    except Exception as e:
+        logger.error("List API keys error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route("/admin/api-keys/rotate", methods=["POST"])
+@admin_required("super_admin")
+def rotate_org_api_key():
+    """
+    Creates a new active key version without revoking existing active keys.
+    Return the secret once only. Revoke old keys after clients have migrated.
+    """
+    try:
+        with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute("SELECT slug FROM organisations WHERE id = %s", (g.admin["org_id"],))
+            org = cursor.fetchone()
+            if not org:
+                return jsonify({"error": "Organisation not found"}), 404
+
+            cursor.execute("SELECT COALESCE(MAX(key_version), 0) + 1 AS next_version FROM org_api_keys WHERE org_id = %s", (g.admin["org_id"],))
+            version = int(cursor.fetchone()["next_version"])
+            public_key, secret_key = generate_api_key_pair(org["slug"], version)
+
+            cursor.execute(
+                """
+                INSERT INTO org_api_keys
+                    (org_id, key_version, public_key, secret_key_hash, secret_key_last4, status, created_by)
+                VALUES (%s, %s, %s, %s, %s, 'active', %s)
+                RETURNING id, key_version, public_key, status, activated_at
+                """,
+                (g.admin["org_id"], version, public_key, hash_api_secret(secret_key), secret_key[-4:], g.admin["sub"]),
+            )
+            created = cursor.fetchone()
+            write_audit_log(
+                cursor,
+                org_id=g.admin["org_id"],
+                actor_type="admin",
+                actor_id=g.admin["sub"],
+                action="api_key.rotated",
+                entity_type="org_api_key",
+                entity_id=created["id"],
+                after_data={"key_version": version, "public_key": public_key, "status": "active"},
+            )
+
+        response = jsonify({
+            "id": created["id"],
+            "key_version": created["key_version"],
+            "public_key": created["public_key"],
+            "secret_key": secret_key,
+            "status": created["status"],
+            "activated_at": created["activated_at"],
+            "important": "Store the secret_key now. It is shown once and only the hash is stored.",
+        })
+        return set_admin_cookie(response, {"id": g.admin["sub"], "email": g.admin["email"], "role": g.admin["role"], "org_id": g.admin["org_id"]})
+    except Exception as e:
+        logger.error("Rotate API key error: %s", e)
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route("/admin/api-keys/<key_id>/revoke", methods=["POST"])
+@admin_required("super_admin")
+def revoke_org_api_key(key_id):
+    try:
+        with db_cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute(
+                """
+                UPDATE org_api_keys
+                SET status = 'revoked', revoked_at = NOW()
+                WHERE id = %s AND org_id = %s AND status <> 'revoked'
+                RETURNING id, key_version, public_key
+                """,
+                (key_id, g.admin["org_id"]),
+            )
+            revoked = cursor.fetchone()
+            if not revoked:
+                return jsonify({"error": "API key not found"}), 404
+
+            write_audit_log(
+                cursor,
+                org_id=g.admin["org_id"],
+                actor_type="admin",
+                actor_id=g.admin["sub"],
+                action="api_key.revoked",
+                entity_type="org_api_key",
+                entity_id=revoked["id"],
+                after_data={"key_version": revoked["key_version"], "public_key": revoked["public_key"], "status": "revoked"},
+            )
+
+        response = jsonify({"status": "revoked", "id": revoked["id"], "key_version": revoked["key_version"]})
+        return set_admin_cookie(response, {"id": g.admin["sub"], "email": g.admin["email"], "role": g.admin["role"], "org_id": g.admin["org_id"]})
+    except Exception as e:
+        logger.error("Revoke API key error: %s", e)
         return jsonify({"error": "Internal server error"}), 500
 
 
